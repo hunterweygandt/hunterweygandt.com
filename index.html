@@ -4,23 +4,85 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hunter Weygandt | Cybersecurity</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 <body>
 
-    <h1>Hunter Weygandt</h1>
-    <p>IT Professional | Cybersecurity</p>
+    <header>
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ <span id="command"></span><span class="cursor">|</span></p>
+            <h1>Hunter Weygandt</h1>
+            <p class="tagline">Build. Break. Secure. Repeat.</p>
+        </div>
 
-    <h2>About</h2>
-    <p>Your intro here.</p>
+        <div class="social-links">
+            <a href="https://linkedin.com/in/hunterweygandt" target="_blank"><i class="fab fa-linkedin-in"></i></a>
+            <a href="https://github.com/hunterweygandt" target="_blank"><i class="fab fa-github"></i></a>
+            <a href="https://tryhackme.com/p/hunterweygandt" target="_blank"><i class="fas fa-terminal"></i></a>
+        </div>
+    </header>
 
-    <h2>Skills</h2>
-    <p>Your skills here.</p>
+    <nav>
+        <a href="#about">About</a>
+        <a href="#projects">Projects</a>
+    </nav>
 
-    <h2>Projects</h2>
-    <p>Your projects here.</p>
+    <section id="about">
+        <h2>About Me</h2>
+        <p class="prompt">visitor@hunterweygandt:~$ whoami<span class="cursor">|</span></p>
+        <p>I’m a Systems Analyst at Meriplex where I work on everything from PC builds and imaging to troubleshooting technical issues and supporting clients on site. A big part of my role is working on two different TAC teams to resolve complex problems, which has taught me how to adapt quickly and communicate effectively under pressure.</p>
+        <p>What motivates me most is keeping systems reliable and secure. Over time, I’ve built a strong foundation in IT operations and support, and I’m now focused on growing into the cybersecurity field. I completed the Cybersecurity Boot Camp at the University of Denver, where I gained hands-on experience with system security, risk management, and incident response, as well as many tools used in the cybersecurity world. I have further progressed my skill set by creating a home lab to have my own environment to play around in as well as consistently advancing my knowledge by practicing on platforms like TryHackMe.</p>
+    </section>
 
-    <h2>Contact</h2>
-    <p>Your contact info here.</p>
+    <section id="projects">
+        <h2>Projects</h2>
+        <p class="prompt">visitor@hunterweygandt:~$ ls -la projects/<span class="cursor">|</span></p>
 
+        <h3>Home Lab</h3>
+        <p>I built and maintain a home lab to gain hands-on experience with virtualization, containerization, networking, and security. The environment is anchored by two servers running Proxmox, where I’ve deployed multiple VMs and LXC containers.</p>
+
+        <h3>Cybersecurity Server</h3>
+        <p>I built a Proxmox-based cybersecurity lab with Active Directory, Parrot, Kali, HackTheBox, a vulnerable Windows VM, an isolated honeypot network, and a Wazuh SIEM monitoring stack. I have used this environment to practice offensive security, threat detection, and safe malware analysis.</p>
+
+        <h3>LILYGO Wireless Pentesting Device (Bruce Firmware)</h3>
+        <p>Flashed Bruce firmware onto a LILYGO ESP32 to create a compact wireless pentesting tool. I tested WiFi recon, Bluetooth scanning, HID (BadUSB), and RFID tag reading in a controlled lab environment to learn how common wireless and physical attacks work.</p>
+    </section>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+<script>
+    const commands = ['ls', 'whoami', 'nmap -sV', 'cat about.txt', 'ls -la projects/'];
+    let cmdIndex = 0;
+    let charIndex = 0;
+    let isDeleting = false;
+
+    function typeCommand() {
+        const current = commands[cmdIndex];
+        const el = document.getElementById('command');
+
+        if (!isDeleting) {
+            el.textContent = current.substring(0, charIndex + 1);
+            charIndex++;
+            if (charIndex === current.length) {
+                isDeleting = true;
+                setTimeout(typeCommand, 1500);
+                return;
+            }
+        } else {
+            el.textContent = current.substring(0, charIndex - 1);
+            charIndex--;
+            if (charIndex === 0) {
+                isDeleting = false;
+                cmdIndex = (cmdIndex + 1) % commands.length;
+            }
+        }
+        setTimeout(typeCommand, isDeleting ? 50 : 100);
+    }
+
+    typeCommand();
+</script>
 </body>
 </html>
