@@ -25,6 +25,8 @@
 
     <nav>
         <a href="#about">About</a>
+        <a href="#skills">Skills</a>
+        <a href="#certifications">Certifications</a>
         <a href="#projects">Projects</a>
     </nav>
 
@@ -33,6 +35,63 @@
         <p class="prompt">visitor@hunterweygandt:~$ whoami<span class="cursor">|</span></p>
         <p>I’m a Systems Analyst at Meriplex where I work on everything from PC builds and imaging to troubleshooting technical issues and supporting clients on site. A big part of my role is working on two different TAC teams to resolve complex problems, which has taught me how to adapt quickly and communicate effectively under pressure.</p>
         <p>What motivates me most is keeping systems reliable and secure. Over time, I’ve built a strong foundation in IT operations and support, and I’m now focused on growing into the cybersecurity field. I completed the Cybersecurity Boot Camp at the University of Denver, where I gained hands-on experience with system security, risk management, and incident response, as well as many tools used in the cybersecurity world. I have further progressed my skill set by creating a home lab to have my own environment to play around in as well as consistently advancing my knowledge by practicing on platforms like TryHackMe.</p>
+    </section>
+
+    <section id="skills">
+        <h2>Skills</h2>
+        <p class="prompt">visitor@hunterweygandt:~$ cat skills.txt<span class="cursor">|</span></p>
+
+        <h3>Networking & Infrastructure</h3>
+        <ul>
+            <li>Firewall <span class="skill-source">(Home Lab, Professional)</span></li>
+            <li>HyperV <span class="skill-source">(Home Lab, Professional)</span></li>
+            <li>VLANs <span class="skill-source">(Home Lab, Professional)</span></li>
+            <li>Active Directory <span class="skill-source">(Home Lab, Professional, TryHackMe)</span></li>
+            <li>TCP/IP, DNS, DHCP <span class="skill-source">(Home Lab, Professional, TryHackMe)</span></li>
+        </ul>
+
+        <h3>Security</h3>
+        <ul>
+            <li>SIEM (Splunk, Wazuh, Elastic) <span class="skill-source">(Home Lab, TryHackMe, University of Denver)</span></li>
+            <li>IDS/IPS <span class="skill-source">(Home Lab, Professional, TryHackMe)</span></li>
+            <li>Incident Response <span class="skill-source">(Home Lab, Professional, TryHackMe)</span></li>
+            <li>Threat Detection <span class="skill-source">(Home Lab, Professional, TryHackMe)</span></li>
+        </ul>
+
+        <h3>Cloud & Identity</h3>
+        <ul>
+            <li>Microsoft 365 <span class="skill-source">(Professional)</span></li>
+            <li>Azure <span class="skill-source">(Professional, University of Denver)</span></li>
+            <li>Exchange Online <span class="skill-source">(Professional)</span></li>
+        </ul>
+
+        <h3>Tools</h3>
+        <ul>
+            <li>Kali Linux <span class="skill-source">(Home Lab, TryHackMe, University of Denver)</span></li>
+            <li>Wireshark <span class="skill-source">(Home Lab, TryHackMe, University of Denver)</span></li>
+            <li>Metasploit <span class="skill-source">(Home Lab, TryHackMe, University of Denver)</span></li>
+            <li>Burp Suite <span class="skill-source">(Home Lab, TryHackMe, University of Denver)</span></li>
+            <li>Nmap <span class="skill-source">(Home Lab, Professional, TryHackMe, University of Denver)</span></li>
+        </ul>
+
+        <p style="margin-top: 30px;">And many more! For a full list of skills visit my <a href="https://linkedin.com/in/hunterweygandt/details/skills" target="_blank">LinkedIn</a>.</p>
+
+    </section>
+
+    <section id="certifications">
+        <h2>Certifications</h2>
+        <p class="prompt">visitor@hunterweygandt:~$ cat certs.txt<span class="cursor">|</span></p>
+
+        <h3>Completed</h3>
+        <ul>
+            <li>Cybersecurity Boot Camp CPD-0119 - University of Denver</li>
+        </ul>
+
+        <h3>In Progress</h3>
+        <ul>
+            <li>CompTIA Security+ SY0-701 <span class="skill-source">(Expected 2026)</span></li>
+        </ul>
+
     </section>
 
     <section id="projects">
@@ -54,7 +113,7 @@
     </footer>
 
 <script>
-    const commands = ['ls', 'whoami', 'nmap -sV', 'cat about.txt', 'ls -la projects/'];
+    const commands = ['ls', 'whoami', 'cat certs.txt','nmap -sV', 'cat skills.txt', 'ls -la projects/'];
     let cmdIndex = 0;
     let charIndex = 0;
     let isDeleting = false;

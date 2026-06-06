@@ -15,7 +15,7 @@ header {
     padding: 60px 20px;
     text-align: center;
     border-bottom: 1px solid #222;
-    background: linear-gradient(135deg, #1a0533 0%, #0a0a0a 50%, #0d1117 100%);
+    background: linear-gradient(135deg, #0d0d1a 0%, #0a0a0a 40%, #0d0a1a 100%);
     background-size: 40px 40px;
 }
 
@@ -86,6 +86,19 @@ footer {
     font-size: 0.85rem;
     border-top: 1px solid #222;
 }
+
+ul li {
+    list-style: none;
+    padding-left: 5px;
+    color: #aaa;
+}
+
+ul li::before {
+    content: ">";
+    color: #a855f7;
+    margin-right: 8px;
+}
+
 .social-links {
     display: flex;
     justify-content: center;
@@ -139,4 +152,18 @@ footer {
 @keyframes blink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }
+}
+
+section a {
+    color: #a855f7;
+    text-decoration: none;
+}
+
+section a:hover {
+    text-decoration: underline;
+}
+
+.skill-source {
+    color: #555;
+    font-size: 0.85rem;
 }
