@@ -1,2 +1,2 @@
 # hunterweygandt.com
-hunterweygandt.com website
+Just my website, nothing to see here.
