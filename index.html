@@ -6,15 +6,23 @@
     <title>Hunter Weygandt | Cybersecurity</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="canonical" href="https://hunterweygandt.com">
     <meta property="og:title" content="Hunter Weygandt | Cybersecurity Portfolio">
+    <meta name="description" content="Hunter Weygandt — IT professional transitioning into cybersecurity. Systems Analyst, home lab builder, security practitioner.">
     <meta property="og:description" content="IT Professional transitioning into cybersecurity. Systems Analyst, home lab builder, security practitioner.">
     <meta property="og:url" content="https://hunterweygandt.com">
     <meta property="og:type" content="website">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 </head>
 <body>
 
     <header>
+        <canvas id="circuit-canvas"></canvas>
+
+        <div class="header-scrim"></div>
         <div class="terminal-header">
             <p class="prompt">visitor@hunterweygandt:~$ <span id="command"></span><span class="cursor">|</span></p>
             <h1>Hunter Weygandt</h1>
@@ -108,7 +116,7 @@
         <p>I built and maintain a home lab to gain hands-on experience with virtualization, containerization, networking, and security. The environment is anchored by two servers running Proxmox, where I’ve deployed multiple VMs and LXC containers.</p>
 
         <h3>Cybersecurity Server</h3>
-        <p>I built a Proxmox-based cybersecurity lab with Active Directory, Parrot, Kali, HackTheBox, a vulnerable Windows VM, an isolated honeypot network, and a Wazuh SIEM monitoring stack. I have used this environment to practice offensive security, threat detection, and safe malware analysis.</p>
+        <p>I built a Proxmox-based cybersecurity lab with Parrot, Kali, HackTheBox, a vulnerable Windows VM, an isolated honeypot network, OSINT focused Kali/Trace Labs tools VM, KASM, OPNSense, and a Wazuh SIEM monitoring stack. I have used this environment to practice OSINT, offensive security, threat detection, and safe malware analysis.</p>
 
         <h3>LILYGO Wireless Pentesting Device (Bruce Firmware)</h3>
         <p>Flashed Bruce firmware onto a LILYGO ESP32 to create a compact wireless pentesting tool. I tested WiFi recon, Bluetooth scanning, HID (BadUSB), and RFID tag reading in a controlled lab environment to learn how common wireless and physical attacks work.</p>
@@ -117,6 +125,8 @@
     <footer>
         <p>&copy; 2026 Hunter Weygandt</p>
     </footer>
+
+<script src="circuit.js"></script>
 
 <script>
     const commands = ['ls', 'whoami', 'cat certs.txt','nmap -sV', 'cat skills.txt', 'whois hunterweygandt.com', 'ls -la projects/', 'msfconsole', 'ping hunterweygandt.com'];
