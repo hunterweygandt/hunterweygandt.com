@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentation | Hunter Weygandt</title>
+    <meta name="description" content="Project documentation and technical write-ups by Hunter Weygandt — homelab builds, security labs, and infrastructure projects.">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/docs.html">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ ls docs/<span class="cursor">|</span></p>
+            <h1>Documentation</h1>
+            <p class="tagline">Project write-ups & lab notes</p>
+        </div>
+    </header>
+
+    <nav>
+        <a href="index.html#about">About</a>
+        <a href="index.html#skills">Skills</a>
+        <a href="index.html#certifications">Certifications</a>
+        <a href="index.html#projects">Projects</a>
+        <a href="docs.html">Documentation</a>
+    </nav>
+
+    <section id="docs-list">
+        <p>Detailed write-ups of projects I've built. Here you can find the decisions, the problems, and how I worked through them.</p>
+
+        <a class="doc-card" href="posts/building-this-site.html">
+            <h3>Building This Site</h3>
+            <p class="doc-summary">How I built this portfolio from scratch. Domain, DNS through Cloudflare, GitHub Pages hosting, HTTPS, and the security configuration behind it.</p>
+        </a>
+        <a class="doc-card" href="posts/cybersecurity-lab.html">
+            <h3>Cybersecurity Lab</h3>
+            <p class="doc-summary">A Proxmox-based security lab built for offensive practice and defensive monitoring. Isolated VMs for pentesting and malware analysis, an Active Directory domain for attack and defense, an OSINT segment routed through a VPN with a kill switch, and a Wazuh SIEM tying it together.</p>
+        </a>
+        <a class="doc-card" href="posts/lilygo-pentest-device.html">
+            <h3>LILYGO Wireless Pentest Device</h3>
+            <p class="doc-summary">Turning a LILYGO T-Embedded CC1101+ into a wireless pentesting tool with Bruce firmware, to study WiFi, BLE, HID, and RFID attacks and the defenses against them.</p>
+        </a>
+
+
+    </section>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../circuit.js"></script>
+</body>
+</html>

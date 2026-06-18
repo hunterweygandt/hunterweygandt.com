@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cybersecurity Lab | Hunter Weygandt</title>
+    <meta name="description" content="A walkthrough of my Proxmox-based cybersecurity lab: isolated VMs for offensive practice, malware analysis, Active Directory attack and defense, OSINT through a VPN, and a Wazuh SIEM monitoring stack.">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/cybersecurity-lab.html">
+    <link rel="icon" type="image/x-icon" href="../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat cybersecurity-lab.md<span class="cursor">|</span></p>
+            <h1>Cybersecurity Lab</h1>
+            <p class="tagline">Security &middot; 2026</p>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../index.html#about">About</a>
+        <a href="../index.html#skills">Skills</a>
+        <a href="../index.html#certifications">Certifications</a>
+        <a href="../index.html#projects">Projects</a>
+        <a href="../docs.html">Documentation</a>
+    </nav>
+
+    <article>
+        <a class="back-link" href="../docs.html">&larr; Back to Documentation</a>
+
+        <h2>Introduction</h2>
+        <p>At some point, reading about this stuff stops being enough. I wanted a place where I could actually run offensive tools, detonate the occasional malware sample, and watch what happens, all without putting my home network or anyone else at risk. So, as one does, I built a dedicated cybersecurity lab.</p>
+        <figure>
+            <img src="../images/cybersecurity-lab-images/security-network-diagram.png" alt="Network diagram of the cybersecurity lab showing the Proxmox host branching into four isolated segments: OSINT routed through OPNsense and a ProtonVPN kill switch, Active Directory, pentest VMs, and an offline honeypot reachable only through a jumpbox, with Wazuh monitoring every segment">
+            <figcaption>The lab at a glance. Each segment is isolated by design: OSINT traffic is forced out through a VPN, the honeypot has no route to the internet, and Wazuh watches everything.</figcaption>
+        </figure>
+
+
+        <p>The whole thing runs on Proxmox as the virtualization layer. On top of that, I've got a handful of isolated VMs: Parrot and Kali for offensive work, a Hack The Box machine, a small Active Directory domain to attack and defend, an offline honeypot, an OSINT setup that routes through a VPN, and a Wazuh SIEM tying the defensive side together. This is a walkthrough of how it's laid out, what each piece does, and the decisions I made to keep all of it contained.</p>
+
+        <h2>Hardware</h2>
+        <p>Nothing exotic. An older i7 with 8 cores and 32 GB of RAM, running on an SSD, with the lab carved up into separate network segments (one of them completely offline for the honeypot).</p>
+
+        <h2>Virtualization Layout</h2>
+        <p>The lab is split into deliberately separated VMs so that offensive testing, vulnerable targets, OSINT, and monitoring never share the same space:</p>
+        <ul>
+            <li>Parrot OS - my primary pentesting workstation</li>
+            <li>Kali Linux - a secondary pentesting VM with a different toolset</li>
+            <li>Parrot HTB VM - dedicated to Hack The Box challenges</li>
+            <li>Offline Honeypot - a vulnerable environment with no internet access and attractive (looking) files</li>
+            <li>Parrot Jumpbox - the only VM allowed to reach the honeypot</li>
+            <li>Windows Server - the domain controller for my Active Directory lab</li>
+            <li>Windows 11 Vulnerable VM - a domain-joined and intentionally misconfigured target</li>
+            <li>OPNsense - the firewall and gateway for my OSINT segment</li>
+            <li>Kali/Trace Labs OSINT VM - my persistent OSINT workbench</li>
+            <li>Kasm Workspaces - disposable browser-based investigation sessions</li>
+            <li>Wazuh SIEM - logging and monitoring across the lab</li>
+        </ul>
+
+        <figure>
+            <img src="../images/cybersecurity-lab-images/px-security.png" alt="Proxmox dashboard showing the lab VMs including parrot, kali, the Windows Server domain controller, win11, honeypot, jumpbox, OPNsense, and the security stack">
+            <figcaption>The lab VMs running under Proxmox.</figcaption>
+        </figure>
+
+        <h2>The Machines &amp; How I Use Them</h2>
+
+        <h3>Parrot OS - Primary Pentesting Workstation</h3>
+        <p>This is my main offensive environment, loaded with the usual suspects like Nmap, Burp Suite, Metasploit, Wireshark, and many more tools. It's where I do recon, enumeration, and scanning, write attack scripts, run tests against the lab targets, and generally spend most of my training and certification practice time.</p>
+
+        <h3>Kali Linux - Secondary Pentesting Environment</h3>
+        <p>Kali is my alternate, with a slightly different toolset and workflow. I mostly use it to compare how tools behave against Parrot, to reach for Kali-specific utilities and wordlists, and to try out new tools in isolation before they ever touch my main machine.</p>
+
+        <h3>Parrot Hack The Box VM</h3>
+        <p>A VM I use only for connecting to Hack The Box. It keeps its own VPN profiles and stays dedicated to HTB boxes, which keeps that work cleanly separated from my primary workstation.</p>
+
+        <h3>Offline Honeypot</h3>
+        <p>This is an intentionally vulnerable Linux machine that lives on a network segment with no way out. I use it to safely run malware samples, test payloads and exploits, practice privilege escalation, and watch how a compromised system behaves. Keeping it offline is the entire point. If something nasty lands on it, there's nowhere for that something to go. No spreading, no phoning home to a command-and-control server.</p>
+
+        <h3>Parrot Jumpbox - Gateway Into the Honeypot</h3>
+        <p>The jumpbox is the only machine allowed to talk to the honeypot, so it acts as a controlled chokepoint. I SSH into the jumpbox from my local machine, and from there I can reach the honeypot. Routing everything through that single point is what keeps the contained mess contained.</p>
+
+        <h3>Windows Server - Active Directory Domain Controller</h3>
+        <p>This is the heart of my AD lab. The Windows Server box runs as a domain controller with the Windows 11 machine joined to the domain, which gives me a small but real Active Directory environment to work in. It sits on the lab network but isn't internet-facing.</p>
+        <p>I use it for both sides of the fence. On offense, it's where I practice the classic AD attack path: enumerating the domain, mapping it out with BloodHound, hunting for misconfigurations, and working through things like Kerberoasting and lateral movement toward domain compromise. On defense, it's where I get to see those same attacks from the other chair, tightening up GPOs, cleaning up the misconfigurations I just abused, and watching the whole thing light up in Wazuh so I can tell what an attack actually looks like in the logs. Getting to run an attack and then immediately hunt for my own footprints has probably taught me more than either side would on its own.</p>
+
+        <h3>Windows 11 Vulnerable VM</h3>
+        <p>A Windows box I purposely misconfigured and joined to the domain. I use it for privilege escalation, password harvesting, PowerShell work, endpoint defense testing, and as a foothold into the AD environment. Most security labs lean heavily Linux, so having a deliberately weak Windows target gives me the offensive Windows reps that may harder to get otherwise.</p>
+
+        <h3>OPNsense - OSINT Segment Gateway</h3>
+        <p>OPNsense runs as the firewall and gateway for my OSINT segment, walling that investigation traffic off from the rest of the lab and from my home network. The important part is that it pushes all of that segment's outbound traffic through ProtonVPN over WireGuard, with a kill switch behind it. If the tunnel ever drops, the firewall just stops passing traffic instead of quietly falling back to my real connection. So anything I do from the OSINT VMs either leaves through the VPN or doesn't leave at all.</p>
+
+        <h3>Kali/Trace Labs OSINT VM - Persistent Workbench</h3>
+        <p>This is my long-lived OSINT environment, built on the Trace Labs OSINT VM (a Kali-based build put together specifically for open-source intelligence and their missing-persons CTFs). Because it's persistent, my tools stay installed and configured between sessions, which is what I want for the heavier, ongoing investigation work. All of its traffic heads out through OPNsense and the VPN.</p>
+
+        <h3>Kasm Workspaces - Disposable Sessions</h3>
+        <p>Kasm gives me throwaway, browser-based sessions that spin up clean and get torn down when I'm finished. When I need a browser that carries no history into the next investigation and leaves nothing behind, this is what I reach for. It routes through OPNsense and the VPN just like the persistent workbench, so even the disposable sessions get the same isolation and anonymity.</p>
+
+        <h3>Wazuh SIEM</h3>
+        <p>Wazuh is the defensive backbone. It watches logs, attacks, and system behavior across the lab and alerts me when something stands out. I set up the Wazuh Manager and Dashboard, then deployed agents across Proxmox, my containers, and the key VMs. It keeps an eye on file integrity, authentication logs, rule-based triggers, honeypot activity, and Windows event logs, including the domain controller, which is what lets me watch my AD attacks play out from the defensive side. This is the side of the lab where I get to practice detection engineering and threat monitoring rather than just attacking things.</p>
+
+        <div class="img-row">
+            <figure>
+                <img src="../images/cybersecurity-lab-images/wazuh-overview.jpg" alt="Wazuh overview dashboard showing 385 medium and 164 low severity alerts in the last 24 hours, plus modules for malware detection, file integrity monitoring, threat hunting, and MITRE ATT&CK mapping">
+                <figcaption>The Wazuh overview, showing alert activity across the lab and the detection modules I work with.</figcaption>
+            </figure>
+            <figure>
+                <img src="../images/cybersecurity-lab-images/wazuh-agents.png" alt="Wazuh dashboard showing six active agents across the lab with their operating systems and status">
+                <figcaption>Wazuh monitoring agents deployed across the lab.</figcaption>
+            </figure>
+        </div>
+
+        <h2>Security Practices</h2>
+        <p>The layout only helps if I'm disciplined about how I run it. The rules I stick to:</p>
+        <ul>
+            <li>No pentesting VM touches the internet during exploit testing</li>
+            <li>The honeypot stays fully isolated with no external routes</li>
+            <li>The AD environment stays on the lab network and never faces the internet</li>
+            <li>The jumpbox is the only path in, which prevents lateral movement</li>
+            <li>OSINT traffic is forced through a VPN tunnel with a kill switch, so nothing leaks if the tunnel drops</li>
+            <li>Wazuh handles detection and alerting across everything</li>
+            <li>Snapshots before any major testing so I can roll back cleanly</li>
+            <li>Strong passwords and 2FA wherever it's available</li>
+            <li>No real-world targets, ever. Strictly internal lab</li>
+        </ul>
+
+        <h2>What I Learned</h2>
+        <p>Building and running this taught me more than any single course could:</p>
+        <ul>
+            <li>Virtualization and network segmentation</li>
+            <li>Offensive testing methodology</li>
+            <li>Active Directory attack paths and how to defend against them</li>
+            <li>Windows and Linux privilege escalation</li>
+            <li>Routing traffic through a VPN with a proper kill switch</li>
+            <li>Malware behavior analysis in isolated environments</li>
+            <li>SIEM configuration, rule tuning, and alerting</li>
+            <li>Safe handling of vulnerable systems</li>
+            <li>Logging, monitoring, and endpoint hardening principles</li>
+        </ul>
+
+        <a class="back-link" href="../docs.html">&larr; Back to Documentation</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../circuit.js"></script>
+
+</body>
+</html>
