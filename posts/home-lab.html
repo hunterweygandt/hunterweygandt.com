@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home Lab | Hunter Weygandt</title>
+    <meta name="description" content="My self-hosted home lab running on Proxmox: DNS filtering, a mesh VPN, self-hosted media, a password manager, smart home automation, and the services tying it all together.">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/home-lab.html">
+    <link rel="icon" type="image/x-icon" href="../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat home-lab.md<span class="cursor">|</span></p>
+            <h1>Home Lab</h1>
+            <p class="tagline">Infrastructure &middot; Always evolving</p>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../index.html#about">About</a>
+        <a href="../index.html#skills">Skills</a>
+        <a href="../index.html#certifications">Certifications</a>
+        <a href="../index.html#projects">Projects</a>
+        <a href="../docs.html">Documentation</a>
+    </nav>
+
+    <article>
+        <a class="back-link" href="../docs.html">&larr; Back to Documentation</a>
+
+        <h2>Introduction</h2>
+        <p>My cybersecurity lab gets most of the attention, but underneath it is a separate home lab that runs the day-to-day stuff: DNS filtering, remote access, media, password management, smart home automation, and a growing pile of self-hosted services. The goal was to build a private, self-hosted environment where I actually own and control my own services instead of renting them from someone else's cloud. It's a constant work in progress and it changes pretty often.</p>
+
+        <p>Everything runs on Proxmox across a couple of machines, with services split across VMs and containers. All told it's handling DNS filtering, a mesh VPN for remote access, self-hosted media, a password vault, smart home automation, self-hosted git, a reverse proxy, and uptime monitoring. This is a walkthrough of what's running, how the pieces fit together, and the decisions I made to keep it secure.</p>
+
+        <h2>Hardware</h2>
+        <p>Nothing purpose-built, which is part of the fun. The main server is currently a gaming laptop (a migration to dedicated hardware is on the list), and a ThinkSystem server plus a second laptop handle Jellyfin, since that box has a CPU that supports hardware transcoding. Proxmox is the hypervisor across the board, storage is a mix of SSD and HDD, and the whole thing runs on my local network with remote access handled through Tailscale.</p>
+
+        <figure>
+            <img src="../images/home-lab-images/network-diagram.png" alt="Network diagram of the home lab showing the managed switch branching to the cybersecurity server, main server, and Jellyfin servers, with services like Pi-hole, AdGuard, Tailscale, Vaultwarden, Home Assistant, and Jellyfin underneath" class="zoomable">
+            <figcaption>The home lab at a glance, branching out from the managed switch.</figcaption>
+        </figure>
+
+        <h2>The Services &amp; How I Use Them</h2>
+
+        <h3>Tailscale - Secure Remote Access</h3>
+        <p>Tailscale builds a private, encrypted mesh VPN so I can reach my home services from anywhere without exposing a single port to the internet. I use it for remote SSH into the servers and for getting to things like Home Assistant and Jellyfin when I'm away from the house, and it handles NAT traversal with basically no configuration. This is the piece that lets everything else stay locked down, since nothing has to be public-facing for me to use it remotely.</p>
+
+        <h3>AdGuard Home - Primary DNS Filtering</h3>
+        <p>AdGuard Home is my main DNS now. It acts as a network-wide sinkhole, blocking ads, trackers, and known-malicious domains before they ever load, with encrypted DNS upstream (DoH/DoT) and custom filter lists. It's the DNS resolver for my home devices, and the query logs give me solid visibility into what's actually talking on the network. The encrypted upstream and deeper filtering options are what eventually won me over and made it the one I lean on.</p>
+
+        <figure>
+            <img src="../images/home-lab-images/adguard-home.png" alt="AdGuard Home dashboard showing total DNS queries, the percentage blocked, and breakdowns of queried and blocked domains">
+            <figcaption>The AdGuard Home dashboard, showing DNS query volume and how much is getting filtered network-wide.</figcaption>
+        </figure>
+
+        <h3>Pi-hole - Secondary DNS</h3>
+        <p>Pi-hole was where I started, and it's still running as a secondary resolver, though honestly I barely touch it these days now that AdGuard is doing the heavy lifting. It does the same core job as a DNS sinkhole, and keeping it around gives me a fallback and an easy way to compare filtering behavior between the two. It's a good example of how a lab evolves over time, where the thing you start with isn't always the thing you end up relying on.</p>
+
+        <h3>Vaultwarden - Self-Hosted Password Manager</h3>
+        <p>Vaultwarden is a lightweight, open-source, self-hosted Bitwarden server that holds my passwords, 2FA codes, and encrypted vault data. It lives entirely on my own server, syncs across all my devices, and is only reachable remotely through Tailscale, so my password vault is never exposed to the public internet. It uses TLS and end-to-end encryption, so even though I host it myself, the vault contents stay encrypted. This is the one I'm most particular about, since it's the keys to everything.</p>
+
+        <h3>Home Assistant - Smart Home Automation</h3>
+        <p>Home Assistant runs my smart home locally instead of leaning on a bunch of vendor clouds. I use it for device dashboards and automations (lights, sensors, routines), and keeping it local means my home automation keeps working and stays private even if the internet drops. It's also been a good hands-on lesson in IoT security and local-first design, since smart home gear is notoriously sketchy about phoning home.</p>
+
+        <h3>Jellyfin - Self-Hosted Media</h3>
+        <p>Jellyfin is my self-hosted media server, streaming my library to TVs, tablets, and phones, and reachable remotely through Tailscale. I deployed it with Docker, and it runs on the box with hardware transcoding so it can actually keep up. It's a solid demonstration of self-hosting, storage management, and getting containerized services configured and talking to each other.</p>
+
+        <h3>Gitea - Self-Hosted Git</h3>
+        <p>Gitea is a lightweight, self-hosted Git service where I keep some of my own code and configs. It gives me a private place to version-control things without pushing everything up to a public host, which is handy for the stuff that's just mine or still half-finished.</p>
+
+        <h3>Nginx - Reverse Proxy</h3>
+        <p>Nginx sits in front of my services as a reverse proxy, giving them clean internal hostnames and handling TLS instead of me juggling a pile of IP addresses and port numbers. It's the piece that makes the rest of the lab feel less like a tangle and more like an actual set of named services.</p>
+
+        <h3>Uptime Kuma - Monitoring</h3>
+        <p>Uptime Kuma keeps an eye on my services and tells me when something goes down. It's a simple, clean status dashboard that means I find out a service died because Uptime Kuma told me, not because I went to use it and it wasn't there.</p>
+
+        <h3>Portainer &amp; Homarr (In Progress)</h3>
+        <p>Two I've stood up recently but haven't fully built out yet. Portainer gives me a UI for managing my Docker containers, and Homarr is meant to become a single dashboard pulling all my services into one place. Both are early days, but they're next on the list as the number of services keeps growing.</p>
+
+        <figure>
+            <img src="../images/home-lab-images/px-server.png" alt="Proxmox dashboard showing the home lab VMs and containers, including AdGuard, Pi-hole, Vaultwarden, Home Assistant, and others running on the server">
+            <figcaption>The home lab services running as VMs and containers under Proxmox.</figcaption>
+        </figure>
+
+        <h2>Security Practices</h2>
+        <p>Self-hosting only makes sense if it's done securely, so the lab is built around keeping things private and closed off:</p>
+        <ul>
+            <li>No ports exposed to the internet</li>
+            <li>Remote access only through Tailscale</li>
+            <li>Encrypted DNS (DoH/DoT) on the upstream resolvers</li>
+            <li>AdGuard (with Pi-hole as a backup) filtering malicious domains network-wide</li>
+            <li>Proxmox backups and snapshots before changes</li>
+            <li>Strong passwords and 2FA on the services that support it</li>
+        </ul>
+
+        <h2>What I Learned</h2>
+        <p>Running this has taught me a lot of the practical sysadmin side of things:</p>
+        <ul>
+            <li>Managing multiple services across different servers</li>
+            <li>DNS filtering with blocklists, allowlists, and logging</li>
+            <li>Mesh VPN networking concepts</li>
+            <li>Home automation and IoT device security</li>
+            <li>Self-hosting and storage management</li>
+            <li>Container and VM management in Proxmox and Docker</li>
+            <li>Tying services together cleanly with a reverse proxy and monitoring</li>
+        </ul>
+
+        <h2>Future Improvements</h2>
+        <p>The list never really gets shorter, but a few things on deck:</p>
+        <ul>
+            <li>Consolidate Jellyfin onto one box with a hardware-accelerated GPU</li>
+            <li>Add Grafana and Prometheus for proper dashboards and metrics</li>
+            <li>Add Unbound for recursive DNS</li>
+            <li>Build out the Homarr dashboard and lean harder on Portainer</li>
+            <li>Keep expanding the smart home automations and self-hosted services</li>
+        </ul>
+
+        <a class="back-link" href="../docs.html">&larr; Back to Documentation</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../circuit.js"></script>
+
+</body>
+</html>
