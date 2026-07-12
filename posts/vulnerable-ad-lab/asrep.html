@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AS-REP Roasting | Hunter Weygandt</title>
+    <meta name="description" content="AS-REP Roasting in the Vulnerable Active Directory Lab">
+    <link rel="stylesheet" href="../../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/vulnerable-ad-lab/asrep.html">
+    <link rel="icon" type="image/x-icon" href="../../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat asrep.html<span class="cursor">|</span></p>
+            <h1>AS-REP Roasting</h1>
+            <p class="tagline">Vulnerable Active Directory Lab &middot; 2026</p>
+        </div>
+
+        <div class="social-links">
+            <a href="https://github.com/hunterweygandt/Vulnerable-AD-DC-Project---Hunter-Weygandt" target="_blank"><i class="fab fa-github"></i></a>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../../index.html#about">About</a>
+        <a href="../../index.html#skills">Skills</a>
+        <a href="../../index.html#certifications">Certifications</a>
+        <a href="../../index.html#projects">Projects</a>
+        <a href="../../docs.html">Documentation</a>
+    </nav>
+
+    <article>
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+
+        <h1>AS-REP Roasting</h1>
+        <h2>Summary</h2>
+        <p>AS-REP roasting targets accounts configured with "Do not require Kerberos preauthentication." Normally, Kerberos requires a user to prove they know their password before the KDC will respond. When pre-auth is disabled, anyone can request an authentication ticket (AS-REP) for that account with no proof of identity, and part of the response is encrypted with the account's password hash, crackable offline. Unlike Kerberoasting, this requires no valid domain credentials at all, only the target's username.</p>
+        <p><strong>MITRE ATT&CK:</strong> T1558.004 (Steal or Forge Kerberos Tickets: AS-REP Roasting) <strong>Target in this lab:</strong> <code>svc_steelmtn</code></p>
+
+        <h2>The misconfiguration</h2>
+        <p>The account has the <code>DoesNotRequirePreAuth</code> flag set. This exists in real environments for compatibility with older systems or applications that can't perform pre-authentication, and it's frequently left on accounts long after the need has passed. Combined with a weak password, it's an easy win for an attacker.</p>
+<pre><code><span class="tok-cmt"># planted on the DC</span>
+<span class="tok-fn">Set-ADAccountControl</span> svc_steelmtn <span class="tok-param">-DoesNotRequirePreAuth</span> <span class="tok-var">$true</span>
+<span class="tok-fn">Set-ADAccountPassword</span> svc_steelmtn <span class="tok-param">-Reset</span> <span class="tok-param">-NewPassword</span> (<span class="tok-fn">ConvertTo-SecureString</span> <span class="tok-str">"Welcome1"</span> <span class="tok-param">-AsPlainText</span> <span class="tok-param">-Force</span>)</code></pre>
+        <p>Detection note: setting this flag changes a UAC value on the account, generating Event 4738 (user account changed). As with the SPN in the Kerberoasting slice, the act of planting the vulnerability is itself observable.</p>
+
+        <h2>Execution</h2>
+        <p>The attack was run two ways to demonstrate both threat models: with no domain credentials at all, and with a low-privilege foothold.</p>
+        <p><strong>Variant 1, no credentials.</strong> Only a list of candidate usernames is needed. This is what makes AS-REP roasting more dangerous than Kerberoasting: a foothold isn't required, an attacker who can guess or enumerate usernames can roast a pre-auth-disabled account completely unauthenticated.</p>
+<pre><code><span class="tok-cmt"># candidate username list</span>
+<span class="tok-cmd">cat</span> <span class="tok-op">&gt;</span> users.txt <span class="tok-op">&lt;&lt;</span> <span class="tok-str">'EOF'</span>
+svc_steelmtn
+svc_sql
+svc_web
+jwellick
+administrator
+<span class="tok-op">EOF</span>
+
+<span class="tok-cmt"># no-credential AS-REP roast</span>
+<span class="tok-cmd">impacket-GetNPUsers</span> ecorp.local/ <span class="tok-param">-dc-ip</span> 10.0.0.88 <span class="tok-param">-usersfile</span> users.txt <span class="tok-param">-no-pass</span> <span class="tok-param">-outputfile</span> asrep_hashes.txt</code></pre>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/ASREP-WithoutPassword.png" alt="Kali terminal running impacket-GetNPUsers against ecorp.local with a username list and -no-pass, requiring no credentials. The tool returns a $krb5asrep$23$ hash for svc_steelmtn@ECORP.LOCAL, then reports that svc_sql, svc_web, jwellick, and administrator each 'doesn't have UF_DONT_REQUIRE_PREAUTH set' - so only the one misconfigured account is roastable. An ls confirms asrep_hashes.txt and users.txt in the working directory.">
+            <figcaption>The no-credential roast: <code>impacket-GetNPUsers</code> with <code>-no-pass</code> returns a crackable AS-REP hash for <code>svc_steelmtn</code> - the only account with pre-auth disabled. Every other candidate reports <code>UF_DONT_REQUIRE_PREAUTH</code> is not set, which is exactly why the misconfiguration is the whole attack.</figcaption>
+        </figure>
+        <p>Only <code>svc_steelmtn</code> returns a hash, the other accounts require pre-auth and are rejected. The hash begins <code>$krb5asrep$23$</code> (23 = RC4). This variant depends on knowing/guessing valid usernames, since there's no directory query to enumerate targets.</p>
+        <p><strong>Variant 2, with a foothold.</strong> Using the sprayed <code>jwellick</code> credentials, the tool queries AD directly and auto-discovers every account with pre-auth disabled, no username guessing required.</p>
+<pre><code><span class="tok-cmd">impacket-GetNPUsers</span> ecorp.local/jwellick:<span class="tok-str">'Ecorp2025'</span> <span class="tok-param">-dc-ip</span> 10.0.0.88 <span class="tok-param">-request</span> <span class="tok-param">-outputfile</span> asrep_hashes.txt</code></pre>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/ASREP-WithPassword.png" alt="Kali terminal running impacket-GetNPUsers as the authenticated user jwellick with the -request flag against ecorp.local. The tool enumerates AS-REP-roastable accounts over LDAP and returns a table listing svc_steelmtn with its PasswordLastSet, a LastLogon of <never>, and UAC value 0x410200, then outputs the account's $krb5asrep$23$ hash to asrep_hashes.txt. An ls confirms the hash file was written.">
+            <figcaption>The credentialed variant: authenticated as <code>jwellick</code>, <code>impacket-GetNPUsers -request</code> enumerates roastable accounts across the domain via LDAP and pulls <code>svc_steelmtn</code>'s AS-REP hash directly. The <code>0x410200</code> UAC value is the account flag with pre-auth disabled - the misconfiguration shown as a bit.</figcaption>
+        </figure>
+
+        <p>This returned <code>svc_steelmtn</code> automatically. The two variants show the distinction: no-creds requires less access but is blind since you must supply the usernames, while the credentialed version is authenticated but requires initial access. Both produce the same crackable AS-REP hash and both generate the same 4768 telemetry on the DC.</p>
+        <p>Cracking with hashcat mode 18200 (AS-REP, distinct from Kerberoasting's 13100). <code>Welcome1</code> is in rockyou, so a plain wordlist run cracks it immediately:</p>
+<pre><code><span class="tok-cmd">hashcat</span> <span class="tok-param">-m</span> 18200 asrep_hashes.txt /usr/share/wordlists/rockyou.txt</code></pre>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/ASREP-WithPasswordCracked.png" alt="hashcat v7.1.2 running mode 18200 (Kerberos 5 AS-REP) against asrep_hashes.txt with the rockyou.txt wordlist. The session status reads 'Cracked' with Recovered 1/1 (100%), and the svc_steelmtn AS-REP hash resolves to the plaintext password Welcome1 after testing only 40960 of 14 million candidates - the weak password falls almost instantly.">
+            <figcaption>The payoff: hashcat mode <code>18200</code> cracks <code>svc_steelmtn</code>'s AS-REP hash against rockyou in well under a second, recovering <code>Welcome1</code>. A weak password on a pre-auth-disabled service account is the entire attack - the roast is only useful because the hash is guessable.</figcaption>
+        </figure>
+
+        <p>Result: <code>svc_steelmtn</code> password recovered as <code>Welcome1</code>.</p>
+
+        <h2>Telemetry generated</h2>
+        <p>The AS-REP request writes Event 4768 (a Kerberos authentication ticket / TGT was requested) to the DC's Security log. The distinguishing field:</p>
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Value</th>
+                        <th>Why it matters</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="mono"><code>win.system.eventID</code></td>
+                        <td class="mono">4768</td>
+                        <td>TGT (authentication ticket) requested</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.targetUserName</code></td>
+                        <td class="mono">svc_steelmtn</td>
+                        <td>The roasted account</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.preAuthType</code></td>
+                        <td class="mono">0</td>
+                        <td>No pre-authentication &mdash; the AS-REP signature</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.ticketEncryptionType</code></td>
+                        <td class="mono">0x17</td>
+                        <td>RC4, the crackable cipher</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.serviceName</code></td>
+                        <td class="mono">krbtgt</td>
+                        <td>Correct for a TGT request</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p>Key contrast: a normal logon produces a 4768 with pre-auth type 2 (encrypted timestamp). Pre-auth type 0 means no identity proof was required, which is the vulnerability itself appearing in the log. This is the mechanical difference from Kerberoasting: AS-REP roasting attacks the initial authentication (4768 / TGT), while Kerberoasting attacks service access (4769 / TGS). Both yield a crackable RC4 hash, but at different stages of Kerberos.</p>
+        <p>Audit requirement: needs "Audit Kerberos Authentication Service" enabled (Success + Failure), which the lab's audit policy sets.</p>
+
+        <h2>Detection</h2>
+        <p>As with Kerberoasting, the stock Wazuh ruleset does not flag AS-REP roasting. It matches 4768 generically and never inspects the pre-auth type, so the attack blends into normal authentication traffic.</p>
+        <p>The detection is actually more accurate than the Kerberoasting rule: pre-auth type 0 is genuinely rare and almost always means either a misconfiguration or an attack. A single field cleanly separates it from normal 4768 noise.</p>
+        <p>Custom rule (<code>/var/ossec/etc/rules/local_rules.xml</code>):</p>
+<pre><code><span class="tok-punc">&lt;</span><span class="tok-tag">group</span> <span class="tok-attr">name</span>=<span class="tok-str">"asrep_roasting,attack,windows,"</span><span class="tok-punc">&gt;</span>
+  <span class="tok-punc">&lt;</span><span class="tok-tag">rule</span> <span class="tok-attr">id</span>=<span class="tok-str">"100202"</span> <span class="tok-attr">level</span>=<span class="tok-str">"12"</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>60103<span class="tok-punc">&lt;/</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.system.eventID"</span><span class="tok-punc">&gt;</span>^4768$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.preAuthType"</span><span class="tok-punc">&gt;</span>^0$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>Possible AS-REP Roasting: TGT requested without pre-authentication for <span class="tok-var">$(win.eventdata.targetUserName)</span><span class="tok-punc">&lt;/</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span>T1558.004<span class="tok-punc">&lt;/</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;/</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span>
+  <span class="tok-punc">&lt;/</span><span class="tok-tag">rule</span><span class="tok-punc">&gt;</span>
+<span class="tok-punc">&lt;/</span><span class="tok-tag">group</span><span class="tok-punc">&gt;</span></code></pre>
+        <p>Rule design notes:</p>
+        <ul>
+            <li>Uses <code>if_sid</code> 60103, the same parent used for the Kerberoasting rule (the level-0 parent for Windows security events).</li>
+            <li>Relies solely on <code>win.eventdata.preAuthType</code> = 0. No encryption-type or account-type condition is needed because pre-auth 0 is already the definitive signal.</li>
+            <li>Fired correctly on the first attempt (field name <code>win.eventdata.preAuthType</code> confirmed in the live event), no debugging required, unlike the Kerberoasting slice.</li>
+        </ul>
+        <p>Result: rule 100202 fires at level 12 with the target account in the description.</p>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/ASREP-Wazuh.png" alt="Wazuh Events view on the DC-VULN agent, filtered to data.win.system.eventID:4768, showing 1 hit in the last hour. The event fires custom rule 100202 (level 12) with the description 'Possible AS-REP Roasting: TGT requested without pre-authentication for svc_steelmtn'. The columns confirm event 4768, serviceName krbtgt, and ticketEncryptionType 0x17 (RC4) - the full AS-REP Roasting signature that the stock ruleset does not flag.">
+            <figcaption>The AS-REP roast fires rule <code>100202</code>: a TGT request (event 4768) for <code>svc_steelmtn</code> with no pre-authentication, encrypted with RC4 (<code>0x17</code>) against <code>krbtgt</code>. Every field the detection keys on is visible in one event.</figcaption>
+        </figure>
+        <p><strong>False positives:</strong> low. The main legitimate source of pre-auth type 0 is other accounts genuinely configured without pre-auth, which is itself a misconfiguration worth alerting on in a real environment. Unlike the RC4 signal in Kerberoasting (which legacy apps trigger normally), pre-auth 0 has very few innocent explanations.</p>
+        
+        <h2>Remediation</h2>
+        <ul>
+            <li>Remove "Do not require Kerberos preauthentication" from all accounts unless a documented legacy dependency requires it.</li>
+            <li>Audit regularly for the flag: <code>Get-ADUser -Filter {DoesNotRequirePreAuth -eq $true}</code>.</li>
+            <li>Enforce strong passwords on any account that must keep the flag, so an obtained AS-REP hash is not practically crackable.</li>
+            <li>Alert on the flag being newly set (4738 with the UAC change).</li>
+        </ul>
+
+        <h2>Notes/Troubleshooting</h2>
+        <ul>
+            <li><strong>users.txt missing.</strong> The no-creds attack reads a username file; forgetting to create it fails immediately with a file-not-found error.</li>
+            <li><strong>Rule fired first try.</strong> The pipeline mechanics learned in the Kerberoasting slice (chain off 60103, test with a live attack not wazuh-logtest, use the decoder's exact field names) carried straight over, so this detection worked immediately.</li>
+        </ul>
+
+
+
+
+
+
+
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../../circuit.js"></script>
+
+</body>
+</html>

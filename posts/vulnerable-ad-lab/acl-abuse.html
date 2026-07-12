@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACL Abuse | Hunter Weygandt</title>
+    <meta name="description" content="ACL Abuse in the Vulnerable Active Directory Lab">
+    <link rel="stylesheet" href="../../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/vulnerable-ad-lab/acl-abuse.html">
+    <link rel="icon" type="image/x-icon" href="../../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat acl-abuse.html<span class="cursor">|</span></p>
+            <h1>ACL Abuse</h1>
+            <p class="tagline">Vulnerable Active Directory Lab &middot; 2026</p>
+        </div>
+
+        <div class="social-links">
+            <a href="https://github.com/hunterweygandt/Vulnerable-AD-DC-Project---Hunter-Weygandt" target="_blank"><i class="fab fa-github"></i></a>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../../index.html#about">About</a>
+        <a href="../../index.html#skills">Skills</a>
+        <a href="../../index.html#certifications">Certifications</a>
+        <a href="../../index.html#projects">Projects</a>
+        <a href="../../docs.html">Documentation</a>
+    </nav>
+
+    <article>
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+
+        <h1>ACL Abuse: GenericAll to Domain Admins</h1>
+        <h2>Summary</h2>
+        <p>Active Directory objects (users, groups, OUs) have access control lists just like files do. When a low-privilege principal holds a dangerous right over a privileged object, GenericAll, WriteDacl, WriteOwner, AddMember, it can escalate privileges without cracking a single password. It simply uses the permission it was wrongly granted. These paths are usually invisible to defenders because they span multiple hops, which is exactly why BloodHound exists: to graph who-can-do- what-to-whom across the entire domain and surface the shortest path to Domain Admin.</p>
+        <p>This is the kill chain: a helpdesk account with GenericAll over a privileged group, chained all the way to Domain Admins.</p>
+        <p><strong>MITRE ATT&CK:</strong> T1098 (Account Manipulation) <strong>Path:</strong> amoss (Helpdesk) -> GenericAll -> IT-Tier1-Admins -> Domain Admins</p>
+
+        <h2>The misconfiguration</h2>
+        <p>Two conditions create the path, both common in real environments:</p>
+        <ol>
+            <li>The Helpdesk group holds <strong>GenericAll</strong> over the IT-Tier1-Admins group. Over-delegation like this happens constantly, a helpdesk team is granted broad rights over a group "so they can manage it," and nobody realizes that GenericAll includes the ability to add arbitrary members.</li>
+            <li>IT-Tier1-Admins is <strong>nested inside Domain Admins</strong>. Nested privileged groups are common and easy to lose track of, so a right over the nested group is effectively a right over Domain Admins.</li>
+        </ol>
+<pre><code><span class="tok-cmt"># planted on the DC: grant Helpdesk GenericAll over IT-Tier1-Admins</span>
+<span class="tok-var">$tier1DN</span> = (<span class="tok-fn">Get-ADGroup</span> <span class="tok-str">"IT-Tier1-Admins"</span>).DistinguishedName
+<span class="tok-var">$sid</span>     = (<span class="tok-fn">Get-ADGroup</span> <span class="tok-str">"Helpdesk"</span>).SID
+<span class="tok-var">$acl</span>     = <span class="tok-fn">Get-Acl</span> <span class="tok-str">"AD:\$tier1DN"</span>
+<span class="tok-var">$ace</span> = <span class="tok-fn">New-Object</span> System.DirectoryServices.ActiveDirectoryAccessRule(
+    <span class="tok-var">$sid</span>,
+    <span class="tok-type">[System.DirectoryServices.ActiveDirectoryRights]</span>::GenericAll,
+    <span class="tok-type">[System.Security.AccessControl.AccessControlType]</span>::Allow,
+    <span class="tok-type">[guid]</span><span class="tok-str">"00000000-0000-0000-0000-000000000000"</span>)
+<span class="tok-var">$acl</span>.AddAccessRule(<span class="tok-var">$ace</span>)
+<span class="tok-fn">Set-Acl</span> <span class="tok-param">-Path</span> <span class="tok-str">"AD:\$tier1DN"</span> <span class="tok-param">-AclObject</span> <span class="tok-var">$acl</span>
+
+<span class="tok-cmt"># nest the privileged group toward Domain Admins</span>
+<span class="tok-fn">Add-ADGroupMember</span> <span class="tok-param">-Identity</span> <span class="tok-str">"Domain Admins"</span> <span class="tok-param">-Members</span> <span class="tok-str">"IT-Tier1-Admins"</span></code></pre>
+
+        <h2>Execution</h2>
+        <h3>Mapping the path with BloodHound</h3>
+        <p>Data was collected from Kali with bloodhound-python using amoss's credentials (amoss is in Helpdesk), then imported into BloodHound CE:</p>
+<pre><code><span class="tok-var">bloodhound-ce-python -d ecorp.local -u amoss -p 'LabP@ssw0rd!2025' -c All -ns 10.0.0.88 --zip</span>
+</code></pre>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/ACLAbuse-BloodhoundCapture.png" alt="Kali terminal running bloodhound-ce-python against ecorp.local as the user amoss, targeting name server 10.0.0.88 with the All collection method. The Kerberos TGT request fails and the tool falls back to NTLM, then connects to the LDAP server dc-vuln.ecorp.local and enumerates the domain: 1 domain, 1 computer, 29 users, 60 groups, 2 GPOs, 8 OUs, 19 containers, 0 trusts. Output is compressed into a timestamped bloodhound.zip ready for ingest.">
+            <figcaption>Collecting the graph data: <code>bloodhound-ce-python</code> authenticates as a low-privileged user and enumerates all of <code>ecorp.local</code> over LDAP, zipping the result for ingest. This is the data behind the attack path in the next screenshot.</figcaption>
+        </figure>
+        <p>Pathfinding from <code>amoss@ecorp.local</code> to <code>Domain Admins@ecorp.local</code> renders the full attack path:</p>
+<pre><code><span class="tok-var">AMOSS --MemberOf--> HELPDESK --GenericAll--> IT-TIER1-ADMINS --MemberOf--> DOMAIN ADMINS
+</span></code></pre>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/ACLAbuse-BloodhoundGUIAttack.png" alt="BloodHound Community Edition pathfinding view showing the ACL Abuse chain in ecorp.local: the user AMOSS is a member of the Helpdesk group, which holds a GenericAll edge over IT-Tier1-Admins, which is in turn a member of Domain Admins - a full path from a low-privileged user to domain dominance. The detail panel confirms the GenericAll ACL is not inherited and lists the net rpc group addmem abuse commands.">
+            <figcaption>BloodHound confirms the path before the attack: Helpdesk holds <code>GenericAll</code> over IT-Tier1-Admins, which nests into Domain Admins - so AMOSS reaches Domain Admins through two hops that never touch a privileged account directly.</figcaption>
+        </figure>
+        <p>BloodHound's edge help panel provides OS-specific abuse instructions (Windows / PowerView, Linux, plus OPSEC considerations). The Linux path was used here since the attacker box is Kali.</p>
+
+        <h2>Abusing the right</h2>
+        <p>GenericAll over a group includes the ability to add members. amoss adds herself to IT-Tier1-Admins, which (being nested in Domain Admins) makes her a domain admin, no password needed:</p>
+<pre><code><span class="tok-cmd">net</span> rpc group addmem <span class="tok-str">"IT-Tier1-Admins"</span> <span class="tok-str">"amoss"</span> <span class="tok-punc">\</span>
+  <span class="tok-param">-U</span> <span class="tok-str">'ecorp.local/amoss%LabP@ssw0rd!2025'</span> <span class="tok-param">-S</span> 10.0.0.88
+
+<span class="tok-cmt"># verify</span>
+<span class="tok-cmd">net</span> rpc group members <span class="tok-str">"IT-Tier1-Admins"</span> <span class="tok-punc">\</span>
+  <span class="tok-param">-U</span> <span class="tok-str">'ecorp.local/amoss%LabP@ssw0rd!2025'</span> <span class="tok-param">-S</span> 10.0.0.88
+<span class="tok-cmt"># -> ECORP\amoss, ECORP\twellick</span></code></pre>
+        <p>amoss is now effectively Domain Admin. The full kill chain from the start of the lab: sprayed employee credential -> helpdesk account (amoss) -> GenericAll abuse -> privileged group -> Domain Admins. All actions here authenticated as amoss using her known password. What makes this step notable is that the escalation from that foothold to Domain Admin required no additional credentials, no cracked hash, and no exploit, only the abuse of an over-permissive ACL. The attacker already had a low-privilege account; GenericAll turned it into domain dominance.</p>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/ACLAbuse-BloodhoundRunningAttack.png" alt="Kali terminal executing the ACL Abuse. The first net rpc group addmem attempt to add amoss to IT-Tier1-Admins fails with 'zsh: no such event: 2025' because the exclamation point in the password triggered history expansion inside double quotes. The command is retried with single quotes and succeeds silently. A final net rpc group members query confirms IT-Tier1-Admins now contains ECORP\amoss and ECORP\twellick - the abuse worked.">
+            <figcaption>Executing the GenericAll abuse: <code>net rpc group addmem</code> adds <code>amoss</code> to IT-Tier1-Admins, and the follow-up <code>net rpc group members</code> confirms the new membership. Note the first attempt fails - the <code>!</code> in the password triggers zsh history expansion under double quotes, so the credential has to be single-quoted.</figcaption>
+        </figure>
+
+        <h2>Telemetry generated</h2>
+        <p>This leaves two distinct footprints on the DC, corresponding to two stages of the attack:</p>
+        <h3>Stage 1, the ACL being granted (setup) -> Event 5136</h3>
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Value</th>
+                        <th>Why it matters</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="mono"><code>win.system.eventID</code></td>
+                        <td class="mono">5136</td>
+                        <td>Directory object modified</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.objectDN</code></td>
+                        <td class="mono">CN=IT-Tier1-Admins,&hellip;</td>
+                        <td>Which object</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.objectClass</code></td>
+                        <td class="mono">group</td>
+                        <td>It's a group</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.attributeLDAPDisplayName</code></td>
+                        <td class="mono">nTSecurityDescriptor</td>
+                        <td>The DACL itself was changed</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p>The <code>nTSecurityDescriptor</code> attribute is the object's security descriptor. A 5136 modifying it means someone rewrote the object's permissions, the fingerprint of ACL-based backdooring.</p>
+        <h3>Stage 2, the group being abused (payoff) -> Event 4728</h3>
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Value</th>
+                        <th>Why it matters</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="mono"><code>win.system.eventID</code></td>
+                        <td class="mono">4728</td>
+                        <td>Member added to global security group</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.targetUserName</code></td>
+                        <td class="mono">IT-Tier1-Admins</td>
+                        <td>The (privileged) group</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.memberName</code></td>
+                        <td class="mono">CN=Angela Moss,&hellip;</td>
+                        <td>Who was added</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.subjectUserName</code></td>
+                        <td class="mono">amoss</td>
+                        <td>Who did it</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p>Audit requirements: "Audit Security Group Management" (4728) and "Audit Directory Service Changes" (5136), both enabled by the lab's policy.</p>
+
+        <h2>Detection</h2>
+        <p>This part required a more specific detection design than the earlier ones. Kerberoasting and AS-REP roasting have signatures that are almost always malicious (RC4-for-a-service-account, pre-auth 0). Group changes are NOT like that, IT adds people to groups all day, so a rule firing on every 4728 would drown the defenders in noise. The fidelity has to come from WHICH group. The rule is therefore scoped to privileged group names.</p>
+        <p>Stock behavior: 4728 matches rule 60141 (level 5) and 5136 matches 60229 (level 4), both generic and low-severity. Neither is aware that a change to a privileged group is a privilege-escalation event.</p>
+        <p>Custom rules (<code>/var/ossec/etc/rules/local_rules.xml</code>):</p>
+<pre><code><span class="tok-punc">&lt;</span><span class="tok-tag">group</span> <span class="tok-attr">name</span>=<span class="tok-str">"privileged_group_change,acl_abuse,attack,windows,"</span><span class="tok-punc">&gt;</span>
+
+  <span class="tok-cmt">&lt;!-- ACL Abuse: attacker adds themselves to a privileged group --&gt;</span>
+  <span class="tok-punc">&lt;</span><span class="tok-tag">rule</span> <span class="tok-attr">id</span>=<span class="tok-str">"100220"</span> <span class="tok-attr">level</span>=<span class="tok-str">"12"</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>60103<span class="tok-punc">&lt;/</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.system.eventID"</span><span class="tok-punc">&gt;</span>^4728$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.targetUserName"</span><span class="tok-punc">&gt;</span>IT-Tier1-Admins|Domain Admins|Enterprise Admins|Server-Admins<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>Privileged group change: <span class="tok-var">$(win.eventdata.memberName)</span> added to <span class="tok-var">$(win.eventdata.targetUserName)</span> by <span class="tok-var">$(win.eventdata.subjectUserName)</span><span class="tok-punc">&lt;/</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span>T1098<span class="tok-punc">&lt;/</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;/</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span>
+  <span class="tok-punc">&lt;/</span><span class="tok-tag">rule</span><span class="tok-punc">&gt;</span>
+
+  <span class="tok-cmt">&lt;!-- ACL Abuse: the DACL edit that granted the rights in the first place --&gt;</span>
+  <span class="tok-punc">&lt;</span><span class="tok-tag">rule</span> <span class="tok-attr">id</span>=<span class="tok-str">"100221"</span> <span class="tok-attr">level</span>=<span class="tok-str">"12"</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>60103<span class="tok-punc">&lt;/</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.system.eventID"</span><span class="tok-punc">&gt;</span>^5136$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.attributeLDAPDisplayName"</span><span class="tok-punc">&gt;</span>^nTSecurityDescriptor$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.objectClass"</span><span class="tok-punc">&gt;</span>^group$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>DACL modified on group <span class="tok-var">$(win.eventdata.objectDN)</span> - possible ACL backdoor<span class="tok-punc">&lt;/</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span>T1098<span class="tok-punc">&lt;/</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;/</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span>
+  <span class="tok-punc">&lt;/</span><span class="tok-tag">rule</span><span class="tok-punc">&gt;</span>
+
+<span class="tok-punc">&lt;/</span><span class="tok-tag">group</span><span class="tok-punc">&gt;</span></code></pre>
+        <p>Rule design notes:</p>
+        <ul>
+            <li><strong>100220 is scoped to privileged group names.</strong> Without the group-name filter it would fire on every routine group change. Matching only sensitive groups turns a noisy signal into an actionable one. This is the difference between a real detection and alert fatigue.</li>
+            <li><strong>100221 catches the ACL backdoor (the setup).</strong> DACL changes on group objects are rare and are the signature of ACL-based persistence/escalation. Scoped to <code>objectClass = group</code> so it doesn't fire on every object modification. Level 10 rather than 12 because legitimate permission changes do occur, but it's still worth surfacing.</li>
+            <li><strong>Two-stage coverage.</strong> 100221 detects the backdoor being planted; 100220 detects it being used. If the ACL grant is missed, the group-add still alerts, and vice versa.</li>
+        </ul>
+        <p>Results: rule 100220 fired at level 12 ("Angela Moss added to IT-Tier1-Admins by amoss"), rule 100221 at level 10 ("DACL modified on group IT-Tier1-Admins").</p>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/ACLAbuse-Wazuh.png" alt="Wazuh Threat Hunting dashboard on the DC-VULN agent, filtered to rule.id 100220 or 100221, showing 3 hits in the last two hours. Two events fire rule 100221 (level 10, event 5136) with the description 'DACL modified on group CN=IT-Tier1-Admins - possible ACL backdoor', and one event fires rule 100220 (level 12, event 4728) with 'Privileged group change: CN=Angela Moss added to IT-Tier1-Admins' - both custom rules detecting the ACL Abuse chain that the stock ruleset misses.">
+            <figcaption>Both halves of the ACL Abuse detection land: rule <code>100221</code> catches the DACL edit (event 5136) that planted the backdoor, and rule <code>100220</code> catches the privileged group change (event 4728) when Angela Moss is added to IT-Tier1-Admins. Neither fires on the stock ruleset.</figcaption>
+        </figure>
+        <p><strong>False positives / tuning:</strong> 100220's accuracy depends entirely on maintaining the privileged-group list, any high-value group must be added to the regex, and legitimate admin additions to those groups will also alert. 100221 will fire on any legitimate permission change to a group object, so in a busy environment it needs tuning: baseline normal delegation changes, or scope to only the most sensitive groups. The self-addition pattern (subject == member) could be added as a higher-fidelity sub-rule for the strongest signal.</p>
+
+        <h2>Remediation</h2>
+        <ul>
+            <li>Audit ACLs on privileged groups regularly; remove GenericAll/WriteDacl grants that aren't strictly required.</li>
+            <li>Apply least privilege to delegation, helpdesk should not hold GenericAll over anything privileged.</li>
+            <li>Group nesting should be reviewed and flattened where it isn't needed, since a chain of nested groups can quietly hand someone Domain Admin through a group they'd never expect to be sensitive.</li>
+            <li>Monitor privileged group membership changes (rule 100220) and DACL modifications on sensitive objects (rule 100221).</li>
+        </ul>
+
+        <h2>Notes/Troubleshooting</h2>
+        <ul>
+            <li><strong>BloodHound shows a point-in-time snapshot.</strong> Data was first collected BEFORE the ACL was planted (the initial PowerShell run errored on a bad constructor and aborted before Set-Acl). BloodHound therefore showed "path not found." The fix was to confirm the ACE actually landed on the DC (Get-Acl showing Helpdesk / GenericAll / Allow), THEN re-collect. Lesson: if BloodHound shows no path, verify the misconfiguration exists in the directory before assuming the tool is wrong, collect after planting, not before.</li>
+            <li><strong>Legacy vs CE data formats differ.</strong> bloodhound-python (legacy) output does not import cleanly into BloodHound CE. Re-collected with bloodhound-ce-python.</li>
+            <li><strong>zsh history expansion.</strong> The <code>!</code> in the password triggered zsh history expansion ("no such event: 2025") and the net command never ran. Single-quoting the credential fixes it.</li>
+            <li><strong>Testing frequency vs single-event rules.</strong> These are single-event rules, so each test just needed one fresh action (remove+re-add the member for 4728, re-run the ACL grant for 5136).</li>
+        </ul>
+
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../../circuit.js"></script>
+
+</body>
+</html>

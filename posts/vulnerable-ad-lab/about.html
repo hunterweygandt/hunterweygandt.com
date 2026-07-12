@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About The AD Lab | Hunter Weygandt</title>
+    <meta name="description" content="About the Vulnerable Active Directory Lab">
+    <link rel="stylesheet" href="../../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/vulnerable-ad-lab/about.html">
+    <link rel="icon" type="image/x-icon" href="../../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat about.html<span class="cursor">|</span></p>
+            <h1>About The AD Lab</h1>
+            <p class="tagline">Vulnerable Active Directory Lab &middot; 2026</p>
+        </div>
+
+        <div class="social-links">
+            <a href="https://github.com/hunterweygandt/Vulnerable-AD-DC-Project---Hunter-Weygandt" target="_blank"><i class="fab fa-github"></i></a>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../../index.html#about">About</a>
+        <a href="../../index.html#skills">Skills</a>
+        <a href="../../index.html#certifications">Certifications</a>
+        <a href="../../index.html#projects">Projects</a>
+        <a href="../../docs.html">Documentation</a>
+    </nav>
+
+    <article>
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+
+        <h2>E Corp AD Detection Lab</h2>
+        <p>A deliberately vulnerable Active Directory environment, themed after Mr. Robot, built to practice the full attack-to-detection loop. Every attack in this lab is run by hand, the telemetry it generates is captured, and a detection is written and tuned against it in Wazuh.</p>
+        <p>The point of this lab is not the attacks. The point is catching them.</p>
+
+        <p class="disclaimer"><strong>Lab use only.</strong> This domain ships with weak passwords and intentional misconfigurations. It is built to be attacked in an isolated environment. Do not run any of this on a network that touches real assets.</p>
+
+        <h2>On the build scripts</h2>
+        <p>The OU structure and user population in <code>Setup/</code> were generated with the help of an AI assistant to save time on boilerplate, the same way you might use BadBlood or a <code>New-ADUser</code> loop.</p>
+
+        <h2>The story</h2>
+        <p>E Corp is the target. fsociety are the attackers, so they have no domain accounts; they break in from outside. The attacks below walk a single coherent kill chain, the same climb the show is about: start with one low-level employee account and end up owning the entire domain.</p>
+<pre><code><span class="tok-cmt"># Password spray a shared employee password        (foothold)</span>
+<span class="tok-var">$password</span> = <span class="tok-str">"Welcome123!"</span>
+<span class="tok-var">$users</span> = <span class="tok-fn">Get-ADUser</span> <span class="tok-param">-Filter</span> <span class="tok-str">"Enabled -eq $true"</span> | <span class="tok-fn">Select-Object</span> -ExpandProperty SamAccountName
+
+<span class="tok-var">$users</span> | <span class="tok-fn">ForEach-Object</span> { <span class="tok-fn">Test-ADCredential</span> <span class="tok-param">-Username</span> $_ <span class="tok-param">-Password</span> $password }
+
+<span class="tok-cmt"># roast service accounts offline           (more creds)</span>
+<span class="tok-fn">Get-ADUser</span> <span class="tok-param">-Filter</span> <span class="tok-str">"ServicePrincipalName -like '*'"</span> | <span class="tok-fn">Select-Object</span> -ExpandProperty ServicePrincipalName
+
+<span class="tok-cmt"># abuse a delegated ACL           (Helpdesk -> Wellick)</span>
+<span class="tok-var">$acl</span> = <span class="tok-fn">Get-Acl</ span>
+</pre></code>
+
+        <h2>The attacks (current phase: DC-only)</h2>
+        <p>This phase covers the full initial-access-to-domain-dominance chain using only a domain controller and a central Wazuh manager, no workstations required. Each attack has its own writeup on my website, hunterweygandt.com, and each ships with a custom Wazuh detection rule, because the stock ruleset does not flag any of these by default.</p>
+        <div class="table-scroll">
+        <table class="attacks-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Attack</th>
+                    <th>Detection type</th>
+                    <th>MITRE</th>
+                    <th>Custom rule</th>
+                    <th>Key telemetry</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="col-num">1</td>
+                    <td class="col-attack">Kerberoasting</td>
+                    <td><span class="badge single">single-event</span></td>
+                    <td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1558/003/">T1558.003</a></td>
+                    <td class="mono">100201</td>
+                    <td class="col-telemetry"><code>4769</code>, <code>RC4 (0x17)</code> for a service account</td>
+                </tr>
+                <tr>
+                    <td class="col-num">2</td>
+                    <td class="col-attack">AS-REP Roasting</td>
+                    <td><span class="badge single">single-event</span></td>
+                    <td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1558/004/">T1558.004</a></td>
+                    <td class="mono">100202</td>
+                    <td class="col-telemetry"><code>4768</code>, pre-auth type 0</td>
+                </tr>
+                <tr>
+                    <td class="col-num">3</td>
+                    <td class="col-attack">Password Spray</td>
+                    <td><span class="badge correlation">stateful correlation</span></td>
+                    <td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1110/003/">T1110.003</a></td>
+                    <td class="mono">100211</td>
+                    <td class="col-telemetry">8+ failed <code>4625</code> from one IP in 60s</td>
+                </tr>
+                <tr>
+                    <td class="col-num">5</td>
+                    <td class="col-attack">ACL Abuse to Domain Admins</td>
+                    <td><span class="badge twostage">two-stage, scoped</span></td>
+                    <td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1098/">T1098</a></td>
+                    <td class="mono">100220 / 100221</td>
+                    <td class="col-telemetry"><code>4728</code> to a privileged group; <code>5136</code> DACL change</td>
+                </tr>
+                <tr>
+                    <td class="col-num">7</td>
+                    <td class="col-attack">DCSync</td>
+                    <td><span class="badge twostage">two-stage, exclusion</span></td>
+                    <td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1003/006/">T1003.006</a></td>
+                    <td class="mono">100230 / 100231</td>
+                    <td class="col-telemetry"><code>4662</code> replication GUIDs from a non-DC account</td>
+                </tr>
+            </tbody>
+        </table>
+        </div>
+        <p>Numbering follows the full kill-chain plan; slices 4 (LLMNR/NBT-NS poisoning) and 6 (pass-the-hash) are network- and workstation-based and are planned for a later phase (see Roadmap).</p>
+
+        <h2>What each detection demonstrates</h2>
+        <ul>
+            <li><strong>Single-event rules (1, 2)</strong> match one anomalous event: an RC4 service ticket, or a pre-auth-disabled TGT request.</li>
+            <li><strong>Stateful correlation (3)</strong> fires on a pattern no single event reveals, a burst of failed logons across many accounts from one source, using Wazuh's frequency and timeframe logic.</li>
+            <li><strong>Context-scoped rules (5)</strong> avoid alert fatigue by firing only on changes to _privileged_ groups, not every routine group change.</li>
+            <li><strong>Exclusion-based rules (7)</strong> separate the attack from legitimate lookalike traffic, alerting on directory replication only when it comes from a non-DC account, since real domain controllers replicate constantly.</li>
+        </ul>
+
+        <h2>Detection stack</h2>
+        <p>Wazuh agents on the DC read the Windows Security and Sysmon event channels locally and ship them to a central manager. Wazuh is agent-based, not a network sniffer, so it sees host events regardless of network topology. Every detection in this phase is host-based and lands cleanly through the agent.</p>
+        <p>A recurring theme: the stock Wazuh ruleset does not detect any of these attacks out of the box. It labels the underlying events as low-severity noise. Each part's real work is tracing the event end to end (generated on the DC, shipped by the agent, then buried at the rule layer) and writing the custom rule that surfaces it. DCSync is the sharpest example, its 4662 events arrive at the manager but produce no default alert, so one of the most severe AD attacks is invisible until a custom rule is built.</p>
+
+        <h2>Build order</h2>
+        <ol>
+            <li><code>Setup/01-Install-DomainController.ps1</code> on a clean Windows Server. Promotes the <code>ecorp.local</code> forest, reboots automatically.</li>
+            <li><code>Setup/02-Build-Environment.ps1</code> as <code>ECORP\Administrator</code> after reboot. Creates the OUs, users, groups, service accounts, and audit policy.</li>
+            <li>Deploy a Wazuh agent to the DC, confirm events land in the dashboard.</li>
+            <li>Add the custom rules from the writeups to <code>/var/ossec/etc/rules/local_rules.xml</code>.</li>
+            <li>Work each slice: plant the misconfiguration, run the attack, confirm the detection fires, document.</li>
+        </ol>
+
+        <h2>Repository layout</h2>
+        <pre class="filetree"><code><span class="root">Vulnerable-AD-DC-Project---Hunter-Weygandt/</span>
+        <span class="tree">├── </span>README.md
+        <span class="tree">├── </span><span class="dir">Setup/</span>
+        <span class="tree">│   ├── </span>01-Install-DomainController.ps1   <span class="cmt">(forest promotion)</span>
+        <span class="tree">│   └── </span>02-Build-Environment.ps1          <span class="cmt">(population + audit policy)</span>
+        <span class="tree">├── </span><span class="dir">Logs/</span>
+        <span class="tree">│   ├── </span>ACL Abuse - Wazuh Log
+        <span class="tree">│   ├── </span>ASREP - Wazuh Log
+        <span class="tree">│   ├── </span>DCSync - Wazuh Log
+        <span class="tree">│   ├── </span>Kerberoasting - Wazuh Log
+        <span class="tree">│   └── </span>Password Spraying - Wazuh Log
+        <span class="tree">└── </span><span class="dir">Wazuh Rules/</span>
+        <span class="tree">    ├── </span>ACL Abuse Rule
+        <span class="tree">    ├── </span>ASREP Rule
+        <span class="tree">    ├── </span>DCSync Rule
+        <span class="tree">    ├── </span>Kerberoasting Rule
+        <span class="tree">    └── </span>Password Spraying Rule
+
+        <span class="root">hunterweygandt.com/posts/vulnerable-ad-lab/</span>
+        <span class="tree">├── </span>about
+        <span class="tree">├── </span>building-the-lab
+        <span class="tree">├── </span>acl-abuse
+        <span class="tree">├── </span>asrep
+        <span class="tree">├── </span>dcsync
+        <span class="tree">├── </span>kerberoasting
+        <span class="tree">└── </span>password-spray</code></pre>
+        
+        <h2>Roadmap</h2>
+        <p>A later phase adds workstation and network-based attacks, which require standing up domain-joined endpoints and network sensors:</p>
+        <ul>
+            <li>LLMNR/NBT-NS poisoning (Responder), detected with Suricata/Zeek</li>
+            <li>Pass-the-hash lateral movement, detected via cross-host logon telemetry</li>
+            <li>Network isolation (segmenting the lab) as a prerequisite for the poisoning work</li>
+        </ul>
+
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../../circuit.js"></script>
+
+</body>
+</html>

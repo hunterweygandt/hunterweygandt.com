@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kerberoasting | Hunter Weygandt</title>
+    <meta name="description" content="Kerberoasting in the Vulnerable Active Directory Lab">
+    <link rel="stylesheet" href="../../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/vulnerable-ad-lab/kerberoasting.html">
+    <link rel="icon" type="image/x-icon" href="../../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat kerberoasting.html<span class="cursor">|</span></p>
+            <h1>Kerberoasting</h1>
+            <p class="tagline">Vulnerable Active Directory Lab &middot; 2026</p>
+        </div>
+
+        <div class="social-links">
+            <a href="https://github.com/hunterweygandt/Vulnerable-AD-DC-Project---Hunter-Weygandt" target="_blank"><i class="fab fa-github"></i></a>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../../index.html#about">About</a>
+        <a href="../../index.html#skills">Skills</a>
+        <a href="../../index.html#certifications">Certifications</a>
+        <a href="../../index.html#projects">Projects</a>
+        <a href="../../docs.html">Documentation</a>
+    </nav>
+
+    <article>
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+
+        <h1>Kerberoasting</h1>
+        <h2>Summary</h2>
+        <p>Kerberoasting abuses a normal feature of Kerberos: any authenticated domain user can request a service ticket (TGS) for any account that has a Service Principal Name (SPN). That ticket is encrypted with the service account's password hash, so an attacker can request it, take it offline, and brute-force the password with no further access to the network and no elevated privileges. It's one of the most common ways an attacker turns a single low-privilege foothold into service-account credentials.</p>
+        <p><strong>MITRE ATT&CK:</strong> T1558.003 (Steal or Forge Kerberos Tickets: Kerberoasting) <strong>Target in this lab:</strong> <code>svc_sql</code> (SPN <code>MSSQLSvc/sql01.ecorp.local:1433</code>)</p>
+        
+        <h2>The misconfiguration</h2>
+        <p>Two conditions make an account kerberoastable, and both are common in real environments:</p>
+        <ol>
+            <li>The account has an SPN registered (it runs a service). This is normal and required for services like SQL Server.</li>
+            <li>The account has a weak, human-set password that rarely rotates. Service accounts are notorious for this because rotating them risks breaking the service, so they get set once and left for years.</li>
+        </ol>
+        <p>In this lab, <code>svc_sql</code> was given an SPN and the password <code>Summer2024</code>, a realistic "season + year" password that us IT people have seen so many times.</p>
+<pre><code><span class="tok-cmt"># on the DC</span>
+setspn <span class="tok-param">-A</span> MSSQLSvc/sql01.ecorp.local:1433 svc_sql
+<span class="tok-fn">Set-ADAccountPassword</span> svc_sql <span class="tok-param">-Reset</span> <span class="tok-param">-NewPassword</span> (<span class="tok-fn">ConvertTo-SecureString</span> <span class="tok-str">"Summer2024"</span> <span class="tok-param">-AsPlainText</span> <span class="tok-param">-Force</span>)</code></pre>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/Kerb-DCSetUp.png" alt="Administrator Windows PowerShell on the DC-VULN domain controller. setspn -A registers the SPN MSSQLSvc/sql01.ecorp.local:1433 to the svc_sql account, and the DC confirms 'Updated object' for CN=SQL Service,OU=ServiceAccounts. Set-ADAccountPassword then resets svc_sql to the weak password Summer2024. A final setspn -L svc_sql verifies the SPN is registered - the account is now Kerberoastable.">
+            <figcaption>Planting the Kerberoasting condition on the DC: <code>setspn -A</code> gives <code>svc_sql</code> an MSSQL service principal name, and <code>Set-ADAccountPassword</code> sets a weak, seasonal password. The <code>setspn -L</code> at the end confirms the SPN stuck - an account with an SPN plus a guessable password is the entire vulnerability.</figcaption>
+        </figure>
+        <p>Detection note: adding an SPN to a user account generates Event 4738 (user account changed). In a real environment, an SPN suddenly appearing on a normal user is suspicious, an attacker sometimes plants one to create a roastable target. This lab detected those 4738 events when the vulnerability was planted.</p>
+
+        <h2>Execution</h2>
+        <p>The attack was run from Kali using a low-privilege domain account (<code>jwellick</code>), whose password was found in another part of this lab using a password spraying method. One compromised employee account is enough to roast every SPN in the domain.</p>
+<pre><code><span class="tok-cmt"># request TGS tickets for all SPN accounts, output in hashcat format</span>
+<span class="tok-cmd">impacket-GetUserSPNs</span> ecorp.local/jwellick:<span class="tok-str">'Ecorp2025'</span> <span class="tok-param">-dc-ip</span> 10.0.0.88 <span class="tok-param">-request</span> <span class="tok-param">-outputfile</span> kerb_hashes.txt</code></pre>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/Kerb-RunningExploit.png" alt="Kali terminal running impacket-GetUserSPNs as the authenticated user jwellick with -request against ecorp.local. The tool lists the roastable SPN account in a table - ServicePrincipalName MSSQLSvc/sql01.ecorp.local:1433, name svc_sql, LastLogon never - and requests its TGS ticket, writing a $krb5tgs$23$ hash to kerb_hashes.txt. An ls confirms the hash file was written.">
+            <figcaption>The roast: authenticated as <code>jwellick</code>, <code>GetUserSPNs -request</code> finds the <code>svc_sql</code> account by its <code>MSSQLSvc</code> SPN and requests a service ticket, yielding a crackable <code>$krb5tgs$23$</code> hash. The RC4 ticket (etype 23) is exactly what the DC logs as event 4769.</figcaption>
+        </figure>
+        <p>The returned hash begins <code>$krb5tgs$23$</code>, where <code>23</code> indicates RC4 encryption:</p>
+<pre><code>$krb5tgs$23$*svc_sql$ECORP.LOCAL$ecorp.local/svc_sql...</code></pre>
+        <p>Cracking offline with hashcat mode 13100:</p>
+<pre><code><span class="tok-cmd">hashcat</span> <span class="tok-param">-m</span> 13100 kerb_hashes.txt /usr/share/wordlists/rockyou.txt</code></pre>
+        <p>Finding: <code>Summer2024</code> is not in the stock rockyou list, so a plain wordlist run exhausted without cracking. The fix was a year-insertion rule, which takes a rockyou base word (<code>Summer</code>) and inserts a year value to build <code>Summer2024</code>. I ended up running a few different insertion rules, here is the one that cracked it:</p>
+<pre><code><span class="tok-cmd">hashcat</span> <span class="tok-param">-m</span> 13100 kerb_hashes.txt /usr/share/wordlists/rockyou.txt <span class="tok-op">\</span>
+  <span class="tok-param">-r</span> /usr/share/hashcat/rules/T0XlC-insert_00-99_1950-2050_toprules_0_F.rule</code></pre>
+        <p>Result: <code>Status: Cracked</code>, recovering <code>svc_sql</code>'s password <code>Summer2024</code>.</p>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/Kerb-CrackedPassword.png" alt="hashcat v7.1.2 running mode 13100 (Kerberos 5 TGS-REP) against kerb_hashes.txt with rockyou.txt and the T0XlC digit/year-insertion rule file. The rule set loads 5616 rules, expanding the keyspace to over 80 billion candidates, and the session status reads 'Cracked' - the svc_sql TGS hash resolves to the plaintext password Summer2024.">
+            <figcaption>The crack that needed a rule: plain rockyou wouldn't contain <code>Summer2024</code>, but the <code>T0XlC</code> insertion rule appends years to base words, mutating <code>Summer</code> into the real password. hashcat mode <code>13100</code> recovers <code>svc_sql:Summer2024</code> - a word-plus-year password that isn't in any wordlist verbatim yet still falls.</figcaption>
+        </figure>
+        <p>The full chain: sprayed employee credential -> TGS request -> offline crack -> <code>svc_sql</code> password recovered, all without elevated access.</p>
+
+        <h2>Telemetry generated</h2>
+        <p>The ticket request wrote Event 4769 (Kerberos service ticket requested) to the DC's Security log. The fields that matter:</p>
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Value</th>
+                        <th>Why it matters</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="mono"><code>win.system.eventID</code></td>
+                        <td class="mono">4769</td>
+                        <td>Service ticket requested</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.serviceName</code></td>
+                        <td class="mono">svc_sql</td>
+                        <td>The roasted account (a user, not a machine)</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.ticketEncryptionType</code></td>
+                        <td class="mono">0x17</td>
+                        <td>RC4, the crackable/forced cipher</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.targetUserName</code></td>
+                        <td class="mono">jwellick@ECORP.LOCAL</td>
+                        <td>The requesting account</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.ipAddress</code></td>
+                        <td class="mono">::ffff:10.0.0.76</td>
+                        <td>The attacker (Kali)</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p>Audit requirement: this event only exists if "Audit Kerberos Service Ticket Operations" is enabled. The lab's audit policy enables it (Success + Failure).</p>
+
+        <h2>Detection</h2>
+        <p>Out of the box, Wazuh does not detect Kerberoasting. The stock ruleset matches 4769 with rule 60106 ("Windows Logon Success", level 3) via parent 60103, and treats every ticket request identically regardless of encryption type. The attack blends into level-3 noise and never surfaces. This gap is the reason a custom rule was needed.</p>
+        <p>The detection logic keys on the combination that distinguishes roasting from normal traffic: an RC4 ticket (<code>0x17</code>) requested for a service account, which is a user account, not a machine account. Machine accounts end in <code>$</code>; service user accounts do not. RC4 alone is not malicious (legacy systems use it) and 4769 alone is constant noise, but RC4 + non-machine-account together is the Kerberoasting fingerprint.</p>
+        <p>Custom rule (<code>/var/ossec/etc/rules/local_rules.xml</code>):</p>
+<pre><code><span class="tok-punc">&lt;</span><span class="tok-tag">group</span> <span class="tok-attr">name</span>=<span class="tok-str">"kerberoasting,attack,windows,"</span><span class="tok-punc">&gt;</span>
+
+  <span class="tok-cmt">&lt;!-- Kerberoasting: RC4 service ticket for a user account (SPN) --&gt;</span>
+  <span class="tok-punc">&lt;</span><span class="tok-tag">rule</span> <span class="tok-attr">id</span>=<span class="tok-str">"100201"</span> <span class="tok-attr">level</span>=<span class="tok-str">"12"</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>60103<span class="tok-punc">&lt;/</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.system.eventID"</span><span class="tok-punc">&gt;</span>^4769$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.ticketEncryptionType"</span><span class="tok-punc">&gt;</span>^0x17$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.serviceName"</span> <span class="tok-attr">negate</span>=<span class="tok-str">"yes"</span><span class="tok-punc">&gt;</span>\$$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>Possible Kerberoasting: RC4 service ticket for account <span class="tok-var">$(win.eventdata.serviceName)</span> requested by <span class="tok-var">$(win.eventdata.targetUserName)</span><span class="tok-punc">&lt;/</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span>T1558.003<span class="tok-punc">&lt;/</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;/</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span>
+  <span class="tok-punc">&lt;/</span><span class="tok-tag">rule</span><span class="tok-punc">&gt;</span>
+
+<span class="tok-punc">&lt;/</span><span class="tok-tag">group</span><span class="tok-punc">&gt;</span></code></pre>
+        <p>Rule design notes:</p>
+        <ul>
+            <li>Uses <code>if_sid</code> 60103, the level-0 parent all 4769 events pass through.</li>
+            <li><code>negate="yes"</code> on <code>serviceName</code> with <code>\$$</code> excludes machine accounts.</li>
+            <li>Level 12 raises it well above the level-3 noise floor so it alerts higher.</li>
+            <li>The description adds the real service and requesting account, so the alert is immediately actionable.</li>
+        </ul>
+        <p>Result: rule 100201 fires at level 12 with the service account and requester populated.</p>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/Kerb-Wazuh.png" alt="Wazuh Events on the DC-VULN agent filtered to rule.id 100201, showing 1 hit. The single event fires the custom rule (level 12) with 'Possible Kerberoasting: RC4 service ticket for account svc_sql requested by jwellick@ECORP.LOCAL', event 4769, serviceName svc_sql, ticketEncryptionType 0x17.">
+            <figcaption>The custom rule <code>100201</code> fires exactly once: a <code>4769</code> service ticket for the user account <code>svc_sql</code>, encrypted with RC4 (<code>0x17</code>), requested by <code>jwellick</code>. One clean hit - the roast, isolated.</figcaption>
+        </figure>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/Kerb-WazuhEvent4769.png" alt="Wazuh Events filtered to raw event 4769 (data.win.system.eventID:4769), showing 11 hits. Only the top row is the Kerberoasting detection (rule 100201, serviceName svc_sql, encryption 0x17). The other ten are 'Windows Logon Success' (rule 60106, level 3) for the krbtgt service or the DC-VULN$ machine account, all using encryption type 0x12 (AES) - legitimate Kerberos traffic.">
+            <figcaption>The same window filtered to <em>all</em> event 4769s: eleven hits, but only the top one is the attack. The other ten are routine - <code>krbtgt</code> and the <code>DC-VULN$</code> machine account, all AES (<code>0x12</code>). This is the noise the rule has to cut through, and exactly why matching on RC4 plus a non-machine account matters.</figcaption>
+        </figure>
+        <p><strong>False positives:</strong> legitimate legacy applications and some service accounts genuinely request RC4 tickets, so this rule is not production-ready as-is. In a real environment it needs tuning: baseline which service accounts normally receive RC4, then alert on deviations, or restrict the rule to high-value SPNs.</p>
+
+        <h2>Remediation</h2>
+        <ul>
+            <li>Use Group Managed Service Accounts (gMSA) so passwords are machine-managed, long, random, and auto-rotated, uncrackable in practice.</li>
+            <li>Where gMSA isn't possible, enforce long (25+ character) service-account passwords.</li>
+            <li>Disable RC4 for Kerberos where legacy support allows, forcing AES (0x12).</li>
+            <li>Monitor for SPNs added to standard user accounts (4738 / 5136).</li>
+        </ul>
+
+        <h2>Notes/Troubleshooting</h2>
+        <ul>
+            <li><strong>Clock skew.</strong> Kerberos enforces a 5-minute time window. The attack failed with KRB_AP_ERR_SKEW until the Kali and DC clocks agreed. Root cause was a drifting PDC clock plus Proxmox host time influence; fixed by pointing the PDC at external NTP with <code>w32tm /config /manualpeerlist ... /reliable:yes</code>.</li>
+            <li><strong>Timezone confusion.</strong> Wazuh stores events in UTC; the DC displays Mountain. A one-hour offset was DST/timezone, not real drift. Set the dashboard <code>dateFormat:tz</code> to America/Denver to fix this.</li>
+            <li><strong>Events "missing" from the dashboard.</strong> The 4769s were generated and shipped, but the stock ruleset never alerted on them, so they weren't findable within Wazuh. Traced end-to-end: confirmed the event on the DC (<code>Get-WinEvent</code>), confirmed the agent forwarded it (<code>ossec.conf</code> has no 4769 exclusion), confirmed the manager received it (<code>archives.json</code>), and found the gap at the rule layer.</li>
+        </ul>
+
+
+
+
+
+
+
+
+
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../../circuit.js"></script>
+
+</body>
+</html>

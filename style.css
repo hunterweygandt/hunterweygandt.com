@@ -106,15 +106,24 @@ footer {
 }
 
 ul li {
-    list-style: none;
-    padding-left: 5px;
-    color: #aaa;
+  list-style: none;
+  position: relative;        /* anchor for the marker */
+  padding-left: 20px;        /* where all text aligns, wrapped lines included */
+  color: #aaa;
 }
-
 ul li::before {
-    content: ">";
-    color: #a855f7;
-    margin-right: 8px;
+  content: ">";
+  position: absolute;        /* was: margin-right: 8px */
+  left: 0;
+  color: #a855f7;
+}
+ul ul {
+  padding-left: 24px;
+  margin-top: 8px;
+}
+ul ul li::before {
+  content: "-";
+  color: #555;
 }
 
 .social-links {
@@ -266,19 +275,29 @@ pre {
     margin: 20px 0;
 }
 
-pre code {
-    font-family: monospace;
-    color: #a855f7;
-    font-size: 0.9rem;
-}
+pre code { color: #c3c3cc; }              /* base text */
+.tok-cmt  { color: #6a6a76; font-style: italic; }  /* # comments */
+.tok-var  { color: #a855f7; }             /* $variables — your accent */
+.tok-fn   { color: #6fb3d6; }             /* cmdlets */
+.tok-str  { color: #8fce9b; }             /* "strings" */
+.tok-type { color: #e0bd7a; }             /* [System...] type accelerators */
+.tok-param{ color: #9a9aa6; }             /* -Path, -Identity */
+.tok-cmd  { color: #6fb3d6; }                      /* net (the command) */
+.tok-punc { color: #8a8a94; }                      /* \ line continuations */
+.tok-tag  { color: #6fb3d6; }   /* <rule>, <field>, <description> */
+.tok-attr { color: #e0bd7a; }   /* id=, level=, name= */
+.tok-op { color: #c99d5a; }   /* redirects: > < << and the EOF marker */
+.tok-num { color: #d19a66; }
 
-p code {
-    background: #1a1a1a;
-    color: #a855f7;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-family: monospace;
-    font-size: 0.9rem;
+
+p code,
+li code {
+  background: #1a1a1a;
+  color: #a855f7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.9rem;
 }
 
 figure { margin: 24px 0; }
@@ -332,14 +351,35 @@ figcaption {
     }
 }
 
-ul ul {
-    padding-left: 24px;
-    margin-top: 8px;
+ol {
+  list-style: none;
+  counter-reset: item;
+  padding-left: 0;
 }
-
-ul ul li::before {
-    content: "-";
-    color: #555;
+ol li {
+  list-style: none;
+  position: relative;        /* anchor for the number */
+  padding-left: 28px;        /* gutter width = where all text aligns */
+  color: #aaa;
+  counter-increment: item;
+}
+ol li::before {
+  content: counter(item) ".";
+  position: absolute;
+  left: 0;
+  width: 20px;               /* number sits in the gutter... */
+  text-align: right;         /* ...right-aligned so 1. and 10. line up */
+  color: #a855f7;
+  font-variant-numeric: tabular-nums;
+}
+ol ol {
+  padding-left: 24px;
+  margin-top: 8px;
+  counter-reset: item;                   /* restart numbering per nested list */
+}
+ol ol li::before {
+  content: counter(item, lower-alpha) ".";   /* a. b. c. for sub-items */
+  color: #555;
 }
 
 .disclaimer {
@@ -364,3 +404,109 @@ ul ul li::before {
 }
 
 .read-more:hover { text-decoration: underline; }
+
+/* Attacks table -------------------------------------------------- */
+.table-scroll {
+  --at-surface:       #16161b;
+  --at-text:          #e7e7ec;
+  --at-text-dim:      #9a9aa6;
+  --at-border:        rgba(255,255,255,0.08);
+  --at-border-strong: rgba(255,255,255,0.18);
+  --at-accent:        #e5484d;   /* E-Corp red, used sparingly */
+  --at-link:          #6fb3d6;
+  --at-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--at-border);
+  border-radius: 10px;
+}
+
+.attacks-table {
+  width: 100%;
+  min-width: 720px;              /* forces scroll instead of squish on mobile */
+  border-collapse: collapse;
+  font-size: 0.94rem;
+}
+.attacks-table.compact { min-width: 420px; }
+.attacks-table thead th {
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--at-text-dim);
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--at-border-strong);
+  white-space: nowrap;
+  background: rgba(255,255,255,0.02);
+}
+.attacks-table tbody td {
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--at-border);
+  vertical-align: top;
+}
+.attacks-table tbody tr:last-child td { border-bottom: 0; }
+.attacks-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.015); }
+.attacks-table tbody tr:hover { background: var(--at-surface); }
+
+.attacks-table .col-num {
+  font-family: var(--at-mono);
+  color: var(--at-accent);
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+  padding-right: 22px;
+}
+.attacks-table .col-attack { font-weight: 600; white-space: nowrap; }
+.attacks-table .mono { font-family: var(--at-mono); font-size: 0.86rem; }
+.attacks-table .col-mitre a {
+  color: var(--at-link);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+.attacks-table .col-mitre a:hover { border-bottom-color: var(--at-link); }
+.attacks-table .col-telemetry {
+  color: var(--at-text-dim);
+  font-family: var(--at-mono);
+  font-size: 0.84rem;
+  min-width: 220px;
+}
+.attacks-table .col-telemetry code { color: var(--at-text); }
+
+.attacks-table .badge {
+  display: inline-block;
+  font-family: var(--at-mono);
+  font-size: 0.72rem;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--at-border-strong);
+  color: var(--at-text-dim);
+  white-space: nowrap;
+}
+.attacks-table .badge.single      { border-color: rgba(111,179,214,.4); color: #9fcbe4; }
+.attacks-table .badge.correlation { border-color: rgba(214,163,67,.45); color: #e0bd7a; }
+.attacks-table .badge.twostage { border-color: rgba(167,139,250,.45); color: #b9a7f5; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .attacks-table tbody tr { transition: background .12s ease; }
+}
+
+.filetree {
+  background: #111114;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 18px 20px;
+  overflow-x: auto;
+  line-height: 1.7;
+}
+.filetree code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.9rem;
+  color: #c3c3cc;                              /* base = files */
+  background: none; padding: 0;                /* cancel any inline-code chip */
+}
+.filetree .root { color: #a855f7; font-weight: 700; }   /* repo / site root */
+.filetree .dir  { color: #a855f7; font-weight: 600; }   /* folders */
+.filetree .tree { color: #4b4b55; }                     /* the ├── │ └── lines */
+.filetree .cmt  { color: #6a6a76; }                     /* (annotations) */

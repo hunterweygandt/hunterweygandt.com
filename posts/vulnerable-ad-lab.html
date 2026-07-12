@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vulnerable Active Directory Lab | Hunter Weygandt</title>
+    <meta name="description" content="Vulnerable Active Directory Lab Documentation">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/vulnerable-ad-lab.html">
+    <link rel="icon" type="image/x-icon" href="../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ ls vulnerable-ad-lab/<span class="cursor">|</span></p>
+            <h1>Documentation</h1>
+            <p class="tagline">Vulnerable Active Directory Lab</p>
+        </div>
+
+        <div class="social-links">
+            <a href="https://github.com/hunterweygandt/Vulnerable-AD-DC-Project---Hunter-Weygandt" target="_blank"><i class="fab fa-github"></i></a>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../index.html#about">About</a>
+        <a href="../index.html#skills">Skills</a>
+        <a href="../index.html#certifications">Certifications</a>
+        <a href="../index.html#projects">Projects</a>
+        <a href="../docs.html">Documentation</a>
+    </nav>
+
+    <section id="docs-list">
+        <p>To see the supporting documents for this project, please visit my GitHub repository.</p>
+        <a href="https://github.com/hunterweygandt/Vulnerable-AD-DC-Project---Hunter-Weygandt" target="_blank" rel="noopener noreferrer">See my GitHub repository</a>
+
+        <a class="doc-card" href="vulnerable-ad-lab/about.html">
+            <h3>About This Project</h3>
+            <p>Why this lab exists, the DC-only scope, and how each attack maps to a custom Wazuh rule.</p>
+        </a>
+        <a class="doc-card" href="vulnerable-ad-lab/building-the-lab.html">
+            <h3>Building The Lab</h3>
+            <p>Standing up the ecorp.local domain controller and Wazuh manager from clean install to first detection.</p>
+        </a>
+        </a>
+        <a class="doc-card" href="vulnerable-ad-lab/kerberoasting.html">
+            <h3>Kerberoasting</h3>
+            <p>Cracking service-account credentials from their SPNs, and catching the RC4 ticket request in event 4769.</p>
+        </a>
+        </a>
+        <a class="doc-card" href="vulnerable-ad-lab/asrep.html">
+            <h3>AS-REP Roasting</h3>
+            <p>Abusing accounts with pre-auth disabled to pull crackable hashes, flagged on a pre-auth type 0 in event 4768.</p>
+        </a>
+        </a>
+        <a class="doc-card" href="vulnerable-ad-lab/password-spray.html">
+            <h3>Password Spraying</h3>
+            <p>One password against many accounts to dodge lockouts, detected by correlating a burst of 4625 failures from a single source.</p>
+        </a>
+        </a>
+        <a class="doc-card" href="vulnerable-ad-lab/acl-abuse.html">
+            <h3>ACL Abuse</h3>
+            <p>Exploiting misconfigured object permissions to reach Domain Admins, tracked through group changes and DACL edits.</p>
+        </a>
+        </a>
+        <a class="doc-card" href="vulnerable-ad-lab/dcsync.html">
+            <h3>DCSync</h3>
+            <p>Impersonating a domain controller to replicate password hashes, caught when replication rights come from a non-DC account.</p>
+        </a>
+
+    </section>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../circuit.js"></script>
+</body>
+</html>

@@ -89,7 +89,7 @@
         </div>
 
         <p>Now it was time to create the website. I started by using a Git command along with my special repository URL to clone my repository onto my local machine.</p>
-        <pre><code>git clone https://github.com/hunterweygandt/hunterweygandt.com.git</code></pre>
+        <pre><code><span class="tok-var">git clone https://github.com/hunterweygandt/hunterweygandt.com.git</span></code></pre>
         <figure>
             <img src="../images/building-this-site-images/6.github-clone.png" alt="Screenshot of the git clone command in the terminal">
             <figcaption>Cloning the GitHub repository.</figcaption>
@@ -102,9 +102,9 @@
         </figure>
 
         <p>After a few long hours of learning the HTML and CSS layout, searching up other portfolios for inspiration, getting lost in MDN Web Docs and CSS Tricks, and asking Claude a couple of questions, I finally had a decent looking website that I was fairly happy with. I ran three Git commands out of VS Code to publish my repository and then I viewed my website.</p>
-<pre><code>git add .
+<pre><code><span class="tok-var">git add .
 git commit -m "web v1.0"
-git push</code></pre>
+git push</span></code></pre>
 
         <p>Finally, the time that I was waiting so impatiently for, the GitHub and Clouflare security settings! Starting off in GitHub, I went back into Settings -> Pages and it was as easy as checking a box saying "Enforce HTTPS". This was easy because I already added the DNS records earlier. GitHub issued my TLS certificate and just like that, all traffic to and from my website is now encrypted.</p>
         <figure>

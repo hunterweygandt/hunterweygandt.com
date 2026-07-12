@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Building The Lab | Hunter Weygandt</title>
+    <meta name="description" content="Building the Vulnerable Active Directory Lab">
+    <link rel="stylesheet" href="../../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/vulnerable-ad-lab/building-the-lab.html">
+    <link rel="icon" type="image/x-icon" href="../../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat building-the-lab.html<span class="cursor">|</span></p>
+            <h1>Building The AD Lab</h1>
+            <p class="tagline">Vulnerable Active Directory Lab &middot; 2026</p>
+        </div>
+
+        <div class="social-links">
+            <a href="https://github.com/hunterweygandt/Vulnerable-AD-DC-Project---Hunter-Weygandt" target="_blank"><i class="fab fa-github"></i></a>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../../index.html#about">About</a>
+        <a href="../../index.html#skills">Skills</a>
+        <a href="../../index.html#certifications">Certifications</a>
+        <a href="../../index.html#projects">Projects</a>
+        <a href="../../docs.html">Documentation</a>
+    </nav>
+
+    <article>
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+
+        <h1>Building the Vulnerable Active Directory Lab</h1>
+        <p>This is the design doc for the E Corp AD detection lab. It covers what the environment is, how it's instrumented, and the decisions behind it.</p>
+
+        <h2>What's in the environment</h2>
+        <p>A single Windows Server domain controller running the <code>ecorp.local</code> forest, one or two domain-joined Windows 11 workstations, and a Wazuh manager collecting events. The domain is populated with around two dozen accounts across an Employees, Executives, Technology, and ServiceAccounts OU structure, plus the groups that define the privilege-escalation path.</p>
+        
+        <h2>Why agents, not a network sensor</h2>
+        <p>Wazuh is agent-based. An agent runs on each Windows host, reads the Security and Sysmon event channels locally, and ships them to the manager over an outbound connection it initiates itself. This matters because the attacks in this phase of the lab are all host-based: Kerberoasting, AS-REP roasting, password spray, ACL abuse, and DCSync all leave their evidence in Windows event logs on the DC. An agent reading those logs sees everything, regardless of where the host sits on the network, so a domain controller and a central manager are all that's needed to detect the full initial-access-to-domain-dominance chain.</p>
+        <p>Network-level attacks (for example LLMNR/NBT-NS poisoning) are a planned future phase and are detected differently, with a network sensor such as Suricata or Zeek watching the traffic rather than a host agent.</p>
+
+        <h2>Why flat first, isolation later</h2>
+        <p>The first instinct was to build everything behind a segmented VLAN with tight firewall rules before touching anything else. That turned out to be the wrong order. Every attack in the current DC-only set is quiet: none of them reach out and touch other machines, so they're all safe to run on a flat network in a homelab. Network-poisoning attacks would be the exception, but those belong to a later workstation-based phase.</p>
+        <p>So isolation was gating the whole project for no benefit at this stage. The call was to build flat, get the foundation and detections working for the host-based attacks, and treat network isolation as a separate, documented step for when the workstation phase begins. Build the thing, then harden it.</p>
+
+        <h2>Audit policy</h2>
+        <p>None of the detections work if the events don't exist, and by default most of them don't. The build script enables exactly the audit subcategories the current attacks need:</p>
+        <ul>
+            <li>Kerberos Service Ticket Operations -> 4769 (Kerberoasting)</li>
+            <li>Kerberos Authentication Service -> 4768 (AS-REP roasting)</li>
+            <li>Credential Validation -> 4776 (NTLM auth during spray)</li>
+            <li>Logon / Logoff -> 4624 / 4625 (password spray)</li>
+            <li>Directory Service Access -> 4662 (DCSync)</li>
+            <li>Directory Service Changes -> 5136 (ACL abuse, DCSync rights grant)</li>
+            <li>Security Group Management -> 4728 / 4732 (privileged group changes)</li>
+        </ul>
+
+        <h2>Staged vulnerabilities, one piece at a time</h2>
+        <p>The build script creates clean infrastructure. It deliberately does not plant most of the vulnerabilities. The only weakness baked in is the shared employee password, because that one is just part of creating the users and it's the shows how password spraying works in the wild.</p>
+        <p>Everything else gets planted one piece at a time: register the SPN for Kerberoasting, disable pre-auth for AS-REP, set the dangerous ACL, and so on. The reason is detection clarity. If all the misconfigurations exist at once, the telemetry overlaps and it's hard to tell which event came from which attack. Planting one, attacking it, capturing its specific events, and writing it up before moving to the next keeps each detection clean.</p>
+
+        <h2>The escalation path</h2>
+        <p>The accounts aren't named at random. The privilege path is cast so the BloodHound graph tells the show's story:</p>
+        <ul>
+            <li>Angela Moss and Bill Harper sit in Helpdesk, low privilege, the foothold.</li>
+            <li>Tyrell Wellick is the Tier-1 admin one rung up.</li>
+            <li>The ACL piece gives Helpdesk control over Wellick's group, which leads toward Domain Admins.</li>
+            <li>Phillip Price, the CEO, is the symbolic crown jewel that DCSync ultimately exposes.</li>
+        </ul>
+        <p>So the full chain reads: compromise a helpdesk account, abuse a delegated right to control Wellick, escalate to Domain Admins, then DCSync the domain and own Price. One coherent narrative from a single sprayed password to total domain compromise.</p>
+
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../../circuit.js"></script>
+
+</body>
+</html>

