@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLMNR/NBT-NS Poisoning | Hunter Weygandt</title>
+    <meta name="description" content="LLMNR/NBT-NS Poisoning in the Vulnerable Active Directory Lab">
+    <link rel="stylesheet" href="../../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/vulnerable-ad-lab/llmnr-poisoning.html">
+    <link rel="icon" type="image/x-icon" href="../../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat llmnr-poisoning.html<span class="cursor">|</span></p>
+            <h1>LLMNR/NBT-NS Poisoning</h1>
+            <p class="tagline">Vulnerable Active Directory Lab &middot; 2026</p>
+        </div>
+
+        <div class="social-links">
+            <a href="https://github.com/hunterweygandt/Vulnerable-AD-DC-Project---Hunter-Weygandt" target="_blank"><i class="fab fa-github"></i></a>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../../index.html#about">About</a>
+        <a href="../../index.html#skills">Skills</a>
+        <a href="../../index.html#certifications">Certifications</a>
+        <a href="../../index.html#projects">Projects</a>
+        <a href="../../docs.html">Documentation</a>
+    </nav>
+
+    <article>
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+
+        <h1>LLMNR/NBT-NS Poisoning</h1>
+
+        <h2>Summary</h2>
+        <p>When a Windows machine fails to resolve a hostname via DNS, it falls back to broadcast name-resolution protocols: Link-Local Multicast Name Resolution (LLMNR, UDP 5355) and NetBIOS Name Service (NBT-NS, UDP 137). These protocols ask the local network "who is this host?" and trust whoever answers first. An attacker running Responder on the same segment answers those queries before anyone else, claiming to be whatever host the victim is looking for. The victim then tries to authenticate to the attacker's machine, sending its NTLMv2 credential hash in the process.</p>
+        <p>The attacker never needed credentials, a vulnerability, or any access beyond being on the same network. A single captured hash, if cracked, yields a plaintext domain password. Even uncracked, it can be relayed for immediate access. This is one of the most common initial-access techniques against Windows environments.</p>
+        <p>This piece is fundamentally different from every other attack in the lab: it is a network-level attack that is invisible to host-based agents. Wazuh's agents on the DC and workstations cannot see poisoned name-resolution traffic because it happens on the wire, not in any Windows event log. Detecting it required a <strong>network sensor</strong>, and running it safely required <strong>network isolation</strong>, which is why this was the final piece of the puzzle, and it was gated behind the VLAN.</p>
+        <p><strong>MITRE ATT&CK:</strong> T1557.001 (Adversary-in-the-Middle: LLMNR/NBT-NS Poisoning) <strong>Target in this lab:</strong> WS01 (victim), captured credentials of the logged-in user</p>
+
+        <h2>The misconfiguration</h2>
+        <p>LLMNR and NBT-NS are enabled by default on every Windows machine. There is nothing to plant for this piece, the vulnerability is the out-of-box Windows configuration itself. Any time a DNS lookup fails (typo, stale shortcut, network drive to a decommissioned server), Windows broadcasts the query to the local segment, and any attacker present can answer.</p>
+        <p>This is the one attack in the lab where the misconfiguration is not something an admin did wrong, it is something they failed to explicitly disable. The default is dangerous.</p>
+
+        <h2>Prerequisites (isolation)</h2>
+        <p>This was the only attack in the lab that could not be safely run on a flat network. Responder answers broadcast queries indiscriminately, so running it on an unsegmented network would poison real machines and capture real credentials. The lab was isolated onto VLAN 60 (10.60.60.0/24) behind OPNsense before any Responder work began:</p>
+        <ul>
+            <li>Lab VMs (DC, WS01, Kali) moved to VLAN 60 on an internal bridge</li>
+            <li>OPNsense as the segment's gateway and firewall</li>
+            <li>Single pinhole to Wazuh (TCP 1514-1515) for continued host-agent reporting</li>
+            <li>All other private-network access blocked</li>
+        </ul>
+
+        <p></p>
+        <h3>VLAN 60 build (OPNsense)</h3>
+        <p><strong>VLAN device:</strong> created <code>vlan01.60</code> on parent <code>vtnet0</code> (the same trunk NIC carrying the existing OSINT VLAN 50). Interfaces &rarr; Devices &rarr; VLAN &rarr; tag 60, parent vtnet0.</p>
+        <p><strong>Interface assignment:</strong> assigned as <code>AD_LAB</code> (opt3), enabled, static IPv4 <code>10.60.60.1/24</code> (the lab segment's gateway).</p>
+        <p><strong>DHCP:</strong> Dnsmasq range <code>10.60.60.100</code>&ndash;<code>10.60.60.200</code> on the AD_LAB interface, with DHCP option 6 (dns-server) set to <code>10.60.60.10</code> (the DC). This is the setting that makes the isolated segment self-contained: every client automatically gets the DC as DNS, so domain resolution works without manual configuration on each workstation.</p>
+        <p><strong>Firewall rules on AD_LAB</strong> (order matters, first match wins):</p>
+        <ol>
+            <li><strong>Pass</strong> &mdash; AD_LAB net &rarr; 10.60.60.1 (gateway) &mdash; allows lab VMs to reach their own router for routing/DNS relay</li>
+            <li><strong>Pass</strong> &mdash; AD_LAB net &rarr; 10.0.0.243, TCP 1514-1515 &mdash; the single pinhole to the Wazuh manager, so host agents keep reporting across the VLAN boundary</li>
+            <li><strong>Block</strong> &mdash; AD_LAB net &rarr; RFC1918 alias (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) &mdash; blocks all other private-network access</li>
+        </ol>
+        <p>No internet pass rule means no internet. The lab is dark except for the one Wazuh pinhole.</p>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/LLMNR-OPNSenseRules.png" alt="OPNsense Firewall Rules for the AD_LAB interface showing three rules in order: Pass IPv4 from AD_LAB net to 10.60.60.1 (Allow lab to gateway), Pass IPv4 TCP from AD_LAB net to 10.0.0.243 ports 1514-1515 (Wazuh agent to manager), and Block IPv4 from AD_LAB net to RFC1918 alias (Block lab to all private network). First-match ordering ensures the Wazuh pinhole is evaluated before the catch-all block.">
+            <figcaption>The three AD_LAB firewall rules in first-match order: gateway access, the single Wazuh pinhole, then a catch-all block on all private networks. The lab is dark except for agent reporting.</figcaption>
+        </figure>
+
+        <p><strong>Outbound NAT:</strong> hybrid mode with a manual rule: WAN interface, source AD_LAB net, translation to interface address. This source-NATs VLAN 60 traffic out OPNsense's WAN-side IP so Wazuh (on the flat network) can reply.</p>
+
+        <h3>VM migration to VLAN 60</h3>
+        <p>Each lab VM was moved to the isolated segment:</p>
+        <ul>
+            <li><strong>DC (VM 108):</strong> Proxmox NIC set to bridge vmbr2, VLAN tag 60. Static IP changed to <code>10.60.60.10/24</code>, gateway <code>10.60.60.1</code>, DNS <code>127.0.0.1</code> (itself). DNS re-registered with <code>ipconfig /registerdns</code> and <code>Restart-Service Netlogon</code>. Verified healthy with <code>dcdiag /test:dns</code> and <code>nltest /dsgetdc:ecorp.local</code> showing the new address.</li>
+            <li><strong>WS01 (VM 500):</strong> Proxmox NIC set to vmbr2, VLAN tag 60. Pulled DHCP (10.60.60.108), DNS automatically set to the DC via DHCP option 6. Domain trust repaired with <code>Test-ComputerSecureChannel -Repair</code>.</li>
+            <li><strong>Kali (VM 102):</strong> Proxmox NIC set to vmbr2, VLAN tag 60. Pulled DHCP (10.60.60.113). IPv6 disabled to prevent DNS override.</li>
+        </ul>
+
+        <p></p>
+        <h3>Verification</h3>
+        <p>From the DC:</p>
+<pre><code><span class="tok-cmt"># pinhole works - agents can still reach Wazuh across VLANs</span>
+<span class="tok-fn">Test-NetConnection</span> <span class="tok-str">10.0.0.243</span> <span class="tok-param">-Port</span> <span class="tok-str">1514</span>   <span class="tok-cmt"># TcpTestSucceeded: True</span>
+
+<span class="tok-cmt"># isolation holds - no access to the real network</span>
+<span class="tok-fn">Test-NetConnection</span> <span class="tok-str">10.0.0.1</span> <span class="tok-param">-Port</span> <span class="tok-str">80</span>       <span class="tok-cmt"># TcpTestSucceeded: False</span></code></pre>
+
+        <h3>Troubleshooting (what broke and why)</h3>
+        <p>The isolation build was the most infrastructure-intensive phase of the lab and surfaced several issues:</p>
+        <ul>
+            <li><strong>Missing default route on the DC.</strong> After the IP migration, the DC had no <code>0.0.0.0/0</code> route, so it could reach its own subnet (gateway ping worked) but nothing beyond it (Wazuh failed instantly). Fixed with <code>New-NetRoute -DestinationPrefix "0.0.0.0/0" -NextHop "10.60.60.1"</code>.</li>
+            <li><strong>Gateway blocked by RFC1918 rule.</strong> The AD_LAB block rule (dest = RFC1918) caught traffic to 10.60.60.1 (the gateway) because it falls inside 10.0.0.0/8. Fixed by adding a pass rule for gateway traffic above the block.</li>
+            <li><strong>Domain trust broken after workstation migration.</strong> WS01's secure channel to the DC broke during the IP/subnet change. Repaired with <code>Test-ComputerSecureChannel -Repair -Credential (Get-Credential)</code>.</li>
+        </ul>
+
+        <h2>Execution</h2>
+        <p>The attack requires the attacker (Kali) and the victim (WS01) to be on the <strong>same broadcast domain</strong> (VLAN 60), so LLMNR/NBT-NS queries reach the attacker.</p>
+        <p><strong>Start Responder on Kali:</strong></p>
+<pre><code><span class="tok-fn">sudo</span> responder <span class="tok-param">-I</span> eth0</code></pre>
+        <p>Responder begins listening for LLMNR, NBT-NS, and mDNS queries on the segment.</p>
+        <p><strong>Trigger a name-resolution fallback on WS01:</strong></p>
+<pre><code><span class="tok-cmt"># any nonexistent hostname works; DNS can't resolve it, Windows falls back to LLMNR/NBT-NS</span>
+<span class="tok-fn">net</span> use \\fakeshare</code></pre>
+        <p>Windows tries to resolve "fakeshare" via DNS (the DC), fails, then broadcasts an LLMNR query: "who is fakeshare?" Responder answers: "that's me" (10.60.60.113, Kali). WS01 believes the answer and attempts to connect to Kali's fake SMB server.</p>
+        <p><strong>Responder captures the hash:</strong></p>
+<pre><code>[LLMNR]  Poisoned answer sent to 10.60.60.108 for name fakeshare
+[NBT-NS] Poisoned answer sent to 10.60.60.108 for name FAKESHARE
+[SMB] NTLMv2-SSP Hash : &lt;domain&gt;\&lt;user&gt;::&lt;hash&gt;</code></pre>
+        <p>The captured NTLMv2 hash can be cracked offline (hashcat -m 5600 with a wordlist) to recover the plaintext password, or relayed directly for immediate access to other systems (NTLM relay). The user never saw anything suspicious, they just got an "access denied" error on what looked like a normal file-share connection.</p>
+        <figure>
+            <img src="../../images/vulnerable-ad-lab-images/LLMNR-ResponderCapture.png" alt="Responder running on Kali (10.60.60.113) on the isolated VLAN 60 segment, showing LLMNR, NBT-NS, and MDNS poisoned answers sent to WS01 (10.60.60.108) for the nonexistent name 'fakeshare', followed by the captured NTLMv2-SSP hash for ECORP\Administrator — the attacker never needed credentials, Responder answered the broadcast query and the victim sent its hash automatically.">
+            <figcaption>Responder poisons LLMNR, NBT-NS, and MDNS queries from WS01 for the nonexistent host "fakeshare," then captures the logged-in user's NTLMv2 hash when WS01 tries to authenticate to Kali's fake SMB server.</figcaption>
+        </figure>
+
+        <h2>Telemetry generated</h2>
+        <p>This is where the piece diverges from every other attack in the lab.</p>
+        <p><strong>What the host agents see: nothing useful.</strong> The Wazuh agent on WS01 sees a failed SMB connection (if anything), but no event identifies the cause as name-resolution poisoning. The poisoned LLMNR/NBT-NS exchange happens at the network layer, below what Windows event logs capture. There is no Event ID for "someone lied to me about a hostname."</p>
+        <p><strong>What the network sensor sees: everything.</strong> A packet capture (tcpdump, tshark, Suricata, or Zeek) on the same segment shows:</p>
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Evidence</th>
+                        <th>What it shows</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>LLMNR query from WS01 (UDP 5355 to 224.0.0.252)</td>
+                        <td>WS01 asking "who is fakeshare?"</td>
+                    </tr>
+                    <tr>
+                        <td>LLMNR response from Kali (UDP 5355)</td>
+                        <td>Kali answering "that's me" &mdash; the poisoning</td>
+                    </tr>
+                    <tr>
+                        <td>NBT-NS query from WS01 (UDP 137 broadcast)</td>
+                        <td>Same query via the legacy protocol</td>
+                    </tr>
+                    <tr>
+                        <td>NBT-NS response from Kali (UDP 137)</td>
+                        <td>Same poisoning via NBT-NS</td>
+                    </tr>
+                    <tr>
+                        <td>SMB connection from WS01 to Kali (TCP 445)</td>
+                        <td>WS01 connecting to the fake server, sending creds</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p>The detection signature: an LLMNR/NBT-NS <strong>response</strong> from a host that is NOT the DNS server. In a healthy network, no machine should be answering name-resolution broadcasts, those queries should either be resolved by DNS or fail. Any host answering is either misconfigured or an attacker.</p>
+
+        <h2>Detection</h2>
+        <p>The detection for this piece used <strong>tcpdump</strong> on Kali (the same segment) to capture the poisoned name-resolution traffic as a pcap file.</p>
+<pre><code><span class="tok-fn">sudo</span> tcpdump <span class="tok-param">-i</span> eth0 <span class="tok-param">-w</span> <span class="tok-str">/tmp/llmnr-capture.pcap</span> <span class="tok-str">"udp port 5355 or udp port 137 or tcp port 445"</span></code></pre>
+        <p>The pcap contains the full exchange: WS01's broadcast query, Kali's spoofed response, and the subsequent SMB connection carrying the credential hash.</p>
+        <p><strong>Why not a Wazuh rule?</strong> Because there is no Windows event to write a rule against. The poisoning happens on the wire, not in an event log.</p>
+        <p><strong>Production detection approaches:</strong></p>
+        <ul>
+            <li><strong>Suricata/Zeek</strong> on a network sensor or span port, with rules alerting on LLMNR/NBT-NS responses from non-DNS hosts</li>
+            <li><strong>Microsoft Defender for Identity</strong> flags LLMNR/NBT-NS poisoning as a recognized alert</li>
+            <li>Correlating unexpected SMB connections (to hosts that aren't file servers) with preceding name-resolution failures</li>
+        </ul>
+        <p><strong>False positives / tuning:</strong> legitimate LLMNR responses are rare in a properly configured network (all resolution should go through DNS). The primary false-positive source is misconfigured printers or IoT devices responding to name queries. In a well-run environment, any LLMNR/NBT-NS response is worth investigating, making this a relatively high-fidelity signal.</p>
+
+        <h2>Remediation</h2>
+        <ul>
+            <li><strong>Disable LLMNR</strong> via Group Policy: Computer Configuration &rarr; Administrative Templates &rarr; Network &rarr; DNS Client &rarr; "Turn off multicast name resolution" &rarr; Enabled.</li>
+            <li><strong>Disable NBT-NS</strong> per adapter: Network adapter &rarr; IPv4 &rarr; Advanced &rarr; WINS &rarr; "Disable NetBIOS over TCP/IP." Push via DHCP option 001/002.</li>
+            <li>Both should be disabled together; leaving one enabled while blocking the other just shifts the attack to the remaining protocol.</li>
+            <li>Enforce <strong>SMB signing</strong> to prevent NTLM relay of captured hashes.</li>
+            <li>Deploy a network sensor (even passive, IDS-only) on segments where users operate, to detect poisoning that host agents cannot see.</li>
+        </ul>
+
+        <h2>Notes/Troubleshooting</h2>
+        <ul>
+            <li><strong>This piece required full network isolation before execution.</strong> Responder poisons any host on the segment, so running it on a flat network would capture real credentials from non-lab machines. The VLAN 60 segmentation was the prerequisite, and was the most infrastructure-intensive work in the entire lab.</li>
+            <li><strong>The isolation build surfaced multiple Proxmox/OPNsense VLAN issues:</strong> OPNsense's trunk NIC had a restricted <code>trunks=</code> that excluded VLAN 60; the DC's default route didn't persist through the IP migration; and OPNsense's firewall rules needed a gateway-pass exception because the AD_LAB gateway address falls inside the RFC1918 block range. Each was diagnosed and resolved.</li>
+            <li><strong>Host-based detection is blind to this attack.</strong> Wazuh's agent on WS01 cannot see the poisoned name-resolution exchange.</li>
+            <li><strong>The trigger matters.</strong> A simple <code>ping fakeshare</code> resolves the name (proving the poisoning) but does not send credentials. An SMB connection (<code>net use</code>, <code>dir \\fakeshare\share</code>, or browsing via Explorer) triggers automatic NTLM authentication and sends the hash to Responder.</li>
+        </ul>
+
+        <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../../circuit.js"></script>
+
+</body>
+</html>

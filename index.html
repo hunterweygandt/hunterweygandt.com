@@ -118,7 +118,7 @@
         <a href="posts/cybersecurity-lab.html" class="read-more">Read the full write-up &rarr;</a>
 
         <h3>Vulnerable AD Detection Lab</h3>
-        <p>I built a deliberately vulnerable Active Directory lab to practice detection engineering across the full initial-access-to-domain-dominance chain. Running on a single domain controller and a central Wazuh manager, it covers five attacks &mdash; Kerberoasting, AS-REP Roasting, Password Spraying, ACL Abuse, and DCSync &mdash; each paired with a custom Wazuh rule that flags activity the stock ruleset misses or only catches generically.</p>
+        <p>I built a deliberately vulnerable Active Directory lab to practice detection engineering across the full initial-access-to-domain-dominance chain. Running on a domain controller, two workstations, and a central Wazuh manager &mdash; isolated behind OPNsense on VLAN 60 &mdash; it covers seven attacks: Kerberoasting, AS-REP Roasting, Password Spraying, LLMNR/NBT-NS Poisoning, ACL Abuse, Pass-the-Hash, and DCSync. Six are paired with custom Wazuh rules that flag activity the stock ruleset misses; one (LLMNR) required a network sensor because host agents can't see it.</p>
         <a href="posts/vulnerable-ad-lab.html" class="read-more">Read the full write-up &rarr;</a>
 
         <h3>Building This Site</h3>

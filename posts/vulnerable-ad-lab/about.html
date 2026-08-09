@@ -42,7 +42,7 @@
         <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
 
         <h2>E Corp AD Detection Lab</h2>
-        <p>A deliberately vulnerable Active Directory environment, themed after Mr. Robot, built to practice the full attack-to-detection loop. Every attack in this lab is run by hand, the telemetry it generates is captured, and a detection is written and tuned against it in Wazuh.</p>
+        <p>A deliberately vulnerable Active Directory environment, themed after Mr. Robot, built to practice the full attack-to-detection loop. Every attack in this lab is run by hand, the telemetry it generates is captured, and a detection is written and tuned against it in Wazuh &mdash; or, for network-level attacks, captured with a network sensor.</p>
         <p>The point of this lab is not the attacks. The point is catching them.</p>
 
         <p class="disclaimer"><strong>Lab use only.</strong> This domain ships with weak passwords and intentional misconfigurations. It is built to be attacked in an isolated environment. Do not run any of this on a network that touches real assets.</p>
@@ -52,21 +52,19 @@
 
         <h2>The story</h2>
         <p>E Corp is the target. fsociety are the attackers, so they have no domain accounts; they break in from outside. The attacks below walk a single coherent kill chain, the same climb the show is about: start with one low-level employee account and end up owning the entire domain.</p>
-<pre><code><span class="tok-cmt"># Password spray a shared employee password        (foothold)</span>
-<span class="tok-var">$password</span> = <span class="tok-str">"Welcome123!"</span>
-<span class="tok-var">$users</span> = <span class="tok-fn">Get-ADUser</span> <span class="tok-param">-Filter</span> <span class="tok-str">"Enabled -eq $true"</span> | <span class="tok-fn">Select-Object</span> -ExpandProperty SamAccountName
+<pre><code>  Password spray a shared employee password    <span class="tok-cmt">(foothold)</span>
+        -&gt; roast service accounts offline        <span class="tok-cmt">(more creds)</span>
+              -&gt; poison name resolution           <span class="tok-cmt">(steal hashes off the wire)</span>
+              -&gt; abuse a delegated ACL            <span class="tok-cmt">(Helpdesk -&gt; Wellick)</span>
+                    -&gt; reach Domain Admins         <span class="tok-cmt">(escalation)</span>
+                          -&gt; move laterally via hash reuse  <span class="tok-cmt">(spread)</span>
+                          -&gt; DCSync the domain      <span class="tok-cmt">(own krbtgt + Phillip Price = own E Corp)</span></code></pre>
 
-<span class="tok-var">$users</span> | <span class="tok-fn">ForEach-Object</span> { <span class="tok-fn">Test-ADCredential</span> <span class="tok-param">-Username</span> $_ <span class="tok-param">-Password</span> $password }
+        <h2>The attacks</h2>
+        <p>Seven attack-to-detection slices covering the full kill chain, from initial access through domain dominance. Each attack has its own writeup on my website, hunterweygandt.com, and each ships with a custom detection, because the stock tooling does not flag any of these by default.</p>
 
-<span class="tok-cmt"># roast service accounts offline           (more creds)</span>
-<span class="tok-fn">Get-ADUser</span> <span class="tok-param">-Filter</span> <span class="tok-str">"ServicePrincipalName -like '*'"</span> | <span class="tok-fn">Select-Object</span> -ExpandProperty ServicePrincipalName
-
-<span class="tok-cmt"># abuse a delegated ACL           (Helpdesk -> Wellick)</span>
-<span class="tok-var">$acl</span> = <span class="tok-fn">Get-Acl</ span>
-</pre></code>
-
-        <h2>The attacks (current phase: DC-only)</h2>
-        <p>This phase covers the full initial-access-to-domain-dominance chain using only a domain controller and a central Wazuh manager, no workstations required. Each attack has its own writeup on my website, hunterweygandt.com, and each ships with a custom Wazuh detection rule, because the stock ruleset does not flag any of these by default.</p>
+        <h3>Host-based detections (Wazuh custom rules)</h3>
+        <p>Six attacks detected via custom Wazuh rules on the DC or workstations. The stock Wazuh ruleset does not flag any of these by default.</p>
         <div class="table-scroll">
         <table class="attacks-table">
             <thead>
@@ -113,6 +111,14 @@
                     <td class="col-telemetry"><code>4728</code> to a privileged group; <code>5136</code> DACL change</td>
                 </tr>
                 <tr>
+                    <td class="col-num">6</td>
+                    <td class="col-attack">Pass-the-Hash</td>
+                    <td><span class="badge correlation">successful-logon anomaly</span></td>
+                    <td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1550/002/">T1550.002</a></td>
+                    <td class="mono">100240</td>
+                    <td class="col-telemetry"><code>4624</code> type 3, NTLM, local account</td>
+                </tr>
+                <tr>
                     <td class="col-num">7</td>
                     <td class="col-attack">DCSync</td>
                     <td><span class="badge twostage">two-stage, exclusion</span></td>
@@ -123,26 +129,67 @@
             </tbody>
         </table>
         </div>
-        <p>Numbering follows the full kill-chain plan; slices 4 (LLMNR/NBT-NS poisoning) and 6 (pass-the-hash) are network- and workstation-based and are planned for a later phase (see Roadmap).</p>
+
+        <h3>Network-based detection (packet capture)</h3>
+        <p>One attack detected with a network sensor, because host-based agents cannot see it. This is the one slice that required full network isolation before execution.</p>
+        <div class="table-scroll">
+        <table class="attacks-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Attack</th>
+                    <th>Detection type</th>
+                    <th>MITRE</th>
+                    <th>Sensor</th>
+                    <th>Key evidence</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="col-num">4</td>
+                    <td class="col-attack">LLMNR/NBT-NS Poisoning</td>
+                    <td><span class="badge single">network capture</span></td>
+                    <td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1557/001/">T1557.001</a></td>
+                    <td class="mono">tcpdump/pcap</td>
+                    <td class="col-telemetry">Poisoned name-resolution response from a non-DNS host</td>
+                </tr>
+            </tbody>
+        </table>
+        </div>
 
         <h2>What each detection demonstrates</h2>
         <ul>
             <li><strong>Single-event rules (1, 2)</strong> match one anomalous event: an RC4 service ticket, or a pre-auth-disabled TGT request.</li>
             <li><strong>Stateful correlation (3)</strong> fires on a pattern no single event reveals, a burst of failed logons across many accounts from one source, using Wazuh's frequency and timeframe logic.</li>
-            <li><strong>Context-scoped rules (5)</strong> avoid alert fatigue by firing only on changes to _privileged_ groups, not every routine group change.</li>
+            <li><strong>Network-level detection (4)</strong> uses a packet capture to see an attack that is invisible to host-based agents, demonstrating the host-vs-network detection split.</li>
+            <li><strong>Context-scoped rules (5)</strong> avoid alert fatigue by firing only on changes to <em>privileged</em> groups, not every routine group change.</li>
+            <li><strong>Successful-logon anomaly (6)</strong> fires on a <em>successful</em> logon that is suspicious by pattern (NTLM network logon with a local account between workstations), not on any failure.</li>
             <li><strong>Exclusion-based rules (7)</strong> separate the attack from legitimate lookalike traffic, alerting on directory replication only when it comes from a non-DC account, since real domain controllers replicate constantly.</li>
         </ul>
 
         <h2>Detection stack</h2>
-        <p>Wazuh agents on the DC read the Windows Security and Sysmon event channels locally and ship them to a central manager. Wazuh is agent-based, not a network sniffer, so it sees host events regardless of network topology. Every detection in this phase is host-based and lands cleanly through the agent.</p>
-        <p>A recurring theme: the stock Wazuh ruleset does not detect any of these attacks out of the box. It labels the underlying events as low-severity noise. Each part's real work is tracing the event end to end (generated on the DC, shipped by the agent, then buried at the rule layer) and writing the custom rule that surfaces it. DCSync is the sharpest example, its 4662 events arrive at the manager but produce no default alert, so one of the most severe AD attacks is invisible until a custom rule is built.</p>
+        <p><strong>Host-based:</strong> Wazuh agents on the DC and workstations read the Windows Security event channel and ship events to a central manager. Custom rules in <code>local_rules.xml</code> surface the attacks the stock ruleset misses.</p>
+        <p><strong>Network-based:</strong> Packet capture (tcpdump) on the isolated lab segment captures name-resolution poisoning that host agents cannot see. This is the one attack class where a network sensor is required.</p>
+        <p>A recurring theme: the stock Wazuh ruleset does not detect any of the host-based attacks out of the box. It labels the underlying events as low-severity noise. Each part's real work is tracing the event end to end and writing the custom rule (or deploying the right sensor) that surfaces it. DCSync is the sharpest example, its 4662 events arrive at the manager but produce no default alert, so one of the most severe AD attacks is invisible until a custom rule is built.</p>
+
+        <h2>Infrastructure</h2>
+        <ul>
+            <li><strong>Proxmox host</strong> running the full lab</li>
+            <li><strong>DC-VULN</strong> (Windows Server 2022) &mdash; ecorp.local domain controller</li>
+            <li><strong>WS01, WS02</strong> (Windows 11) &mdash; domain-joined workstations</li>
+            <li><strong>Kali</strong> &mdash; attacker box + network sensor</li>
+            <li><strong>OPNsense</strong> &mdash; firewall and VLAN gateway</li>
+            <li><strong>Wazuh manager</strong> &mdash; central detection platform</li>
+            <li><strong>VLAN 60</strong> (10.60.60.0/24) &mdash; isolated lab segment with a single pinhole to Wazuh for continued agent reporting</li>
+        </ul>
 
         <h2>Build order</h2>
         <ol>
             <li><code>Setup/01-Install-DomainController.ps1</code> on a clean Windows Server. Promotes the <code>ecorp.local</code> forest, reboots automatically.</li>
             <li><code>Setup/02-Build-Environment.ps1</code> as <code>ECORP\Administrator</code> after reboot. Creates the OUs, users, groups, service accounts, and audit policy.</li>
-            <li>Deploy a Wazuh agent to the DC, confirm events land in the dashboard.</li>
+            <li>Deploy Wazuh agents to the DC and workstations, confirm events land.</li>
             <li>Add the custom rules from the writeups to <code>/var/ossec/etc/rules/local_rules.xml</code>.</li>
+            <li>Isolate the lab (VLAN 60 + OPNsense firewall rules) before running Responder.</li>
             <li>Work each slice: plant the misconfiguration, run the attack, confirm the detection fires, document.</li>
         </ol>
 
@@ -157,30 +204,26 @@
         <span class="tree">│   ├── </span>ASREP - Wazuh Log
         <span class="tree">│   ├── </span>DCSync - Wazuh Log
         <span class="tree">│   ├── </span>Kerberoasting - Wazuh Log
+        <span class="tree">│   ├── </span>Pass-the-Hash - Wazuh Log
         <span class="tree">│   └── </span>Password Spraying - Wazuh Log
         <span class="tree">└── </span><span class="dir">Wazuh Rules/</span>
         <span class="tree">    ├── </span>ACL Abuse Rule
         <span class="tree">    ├── </span>ASREP Rule
         <span class="tree">    ├── </span>DCSync Rule
         <span class="tree">    ├── </span>Kerberoasting Rule
+        <span class="tree">    ├── </span>Pass-the-Hash Rule
         <span class="tree">    └── </span>Password Spraying Rule
 
         <span class="root">hunterweygandt.com/posts/vulnerable-ad-lab/</span>
         <span class="tree">├── </span>about
         <span class="tree">├── </span>building-the-lab
-        <span class="tree">├── </span>acl-abuse
-        <span class="tree">├── </span>asrep
-        <span class="tree">├── </span>dcsync
         <span class="tree">├── </span>kerberoasting
-        <span class="tree">└── </span>password-spray</code></pre>
-        
-        <h2>Roadmap</h2>
-        <p>A later phase adds workstation and network-based attacks, which require standing up domain-joined endpoints and network sensors:</p>
-        <ul>
-            <li>LLMNR/NBT-NS poisoning (Responder), detected with Suricata/Zeek</li>
-            <li>Pass-the-hash lateral movement, detected via cross-host logon telemetry</li>
-            <li>Network isolation (segmenting the lab) as a prerequisite for the poisoning work</li>
-        </ul>
+        <span class="tree">├── </span>asrep
+        <span class="tree">├── </span>password-spray
+        <span class="tree">├── </span>llmnr-poisoning
+        <span class="tree">├── </span>acl-abuse
+        <span class="tree">├── </span>pass-the-hash
+        <span class="tree">└── </span>dcsync</code></pre>
 
         <a class="back-link" href="../vulnerable-ad-lab.html">&larr; Back to the other documents</a>
     </article>
