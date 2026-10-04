@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Honeypot Threat Report | Hunter Weygandt</title>
+    <meta name="description" content="A 30-day threat report from a T-Pot honeypot on the open internet: 7.85 million attack events, where they came from, what bots did after logging in, the malware they dropped, and what small businesses should do about it.">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="canonical" href="https://hunterweygandt.com/posts/honeypot-threat-report.html">
+    <link rel="icon" type="image/x-icon" href="../favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
+</head>
+<body>
+
+    <header>
+        <canvas id="circuit-canvas"></canvas>
+        <div class="header-scrim"></div>
+
+        <div class="terminal-header">
+            <p class="prompt">visitor@hunterweygandt:~$ cat honeypot-threat-report.md<span class="cursor">|</span></p>
+            <h1>Honeypot Threat Report</h1>
+            <p class="tagline">Threat Research &middot; 2026</p>
+        </div>
+    </header>
+
+    <nav>
+        <a href="../index.html#about">About</a>
+        <a href="../index.html#skills">Skills</a>
+        <a href="../index.html#certifications">Certifications</a>
+        <a href="../index.html#projects">Projects</a>
+        <a href="../docs.html">Documentation</a>
+    </nav>
+
+    <article class="report">
+        <a class="back-link" href="../docs.html">&larr; Back to Documentation</a>
+
+        <p class="disclaimer"><strong>Note:</strong> Everything here was collected passively by a honeypot I ran on a server I rented. I never ran any of the malware it caught, attacking IP addresses are partially redacted, and indicators of compromise are defanged so nothing in this report is clickable by accident.</p>
+
+        <h2 id="executive-summary">Executive summary</h2>
+        <p>For 30 days, from September 3 - October 3, 2026, I ran a decoy server on the open internet built to look like more than a dozen exposed services, and recorded everything that tried to break in. It logged about 7.85 million honeypot events, roughly three every second, around the clock.</p>
+
+        <h3>What I found</h3>
+        <ul>
+            <li><strong>Remote Desktop was the top target, and it got worse.</strong> RDP drew about a quarter of all attacks, and its volume roughly tripled over the month.</li>
+            <li><strong>A large share of the traffic came from hosting and data-center networks.</strong> One hosting company, Contabo, sent about 23% of everything, and a single Contabo server sent 6.8% on its own.</li>
+            <li><strong>Attackers guessed passwords instead of exploiting bugs.</strong> The username "Administrator" alone was tried 275,951 times, while only 16 alerts all month matched a known vulnerability.</li>
+            <li><strong>Bots that got in went for crypto mining and staying power.</strong> They checked the hardware, dropped miners like RedTail, swapped in their own SSH keys 557 times, and even changed the account password so nobody else could get back in.</li>
+            <li><strong>Phones, routers and file sharing were targets too.</strong> Bots tried to place fraudulent calls through a fake phone system, logged into a fake router with its factory password in half a second, and infected machines kept probing for Windows file sharing.</li>
+        </ul>
+        <p>Attackers also used my sensor as a reflector in what looks like a DDoS attack against Turkish networks. The honeypot answered those requests, so it probably passed some of that traffic along, which is the one thing I would set up differently next time.</p>
+
+        <h3>What to do about it</h3>
+        <ol>
+            <li>Take RDP off the internet and put it behind a VPN with MFA.</li>
+            <li>Turn on MFA everywhere, rename or disable built-in admin accounts, and use long passphrases instead of relying on complexity rules.</li>
+            <li>Close anything else that doesn't need to face the internet: file sharing, databases, phone systems and router admin pages.</li>
+        </ol>
+        <p>The full list is in the <a href="#recommendations">recommendations section</a>.</p>
+
+        <h2 id="methodology">Scope and methodology</h2>
+        <p>I ran one T-Pot sensor on a rented server in Seattle for a month and analyzed everything that hit it in Kibana.</p>
+
+        <h3>The sensor</h3>
+        <p>The sensor was a Vultr VPS with 4 vCPUs, 16 GB of RAM and 240 GB of NVMe storage, running Debian 13 and T-Pot 24.04.1. I chose my own set of honeypots with T-Pot's customizer instead of using the stock Standard build, and the full list is in the <a href="#services">services table</a>. I left out Mailoney, T-Pot's email honeypot, on purpose so I did not expose the dedicated port-25 SMTP service.</p>
+        <p>I also left T-Pot's ewsposter running, so attack data was shared with Deutsche Telekom's community sensor network during the month.</p>
+
+        <h3>Exposure and lockdown</h3>
+        <p>Vultr's firewall let TCP and UDP ports 1 through 64,000 in from anywhere. That's the bait. Everything above it, including T-Pot's admin ports, was blocked from the internet, and IPv6 was blocked entirely.</p>
+        <p>I managed the server over Tailscale. The sensor was tagged so it could receive connections from my devices but the sensor could not initiate connections to other tailnet devices. I confirmed that two ways: Tailscale's policy preview, and a TCP connection test from the sensor that timed out.</p>
+
+        <h3>Collection window and filtering</h3>
+        <p>I collected from 00:00 UTC on September 3rd to 10:00 UTC on October 3rd, 2026, about 30 days. All times in this report are UTC. The sensor actually went live on August 30th, but the first few days had most likely aged out of T-Pot's 30-day retention by the time I did the analysis.</p>
+        <p>I excluded my own Tailscale traffic with a pinned filter in Kibana. All counts are honeypot events unless I say otherwise.</p>
+
+        <h3>Limits</h3>
+        <ul>
+            <li>One sensor, one IP and one region, so this is a single vantage point.</li>
+            <li>IPv4 only.</li>
+            <li>I left out Mailoney, T-Pot’s dedicated SMTP honeypot, so I did not expose the dedicated port-25 SMTP service.</li>
+            <li>Around September 21st and 22nd the sensor collected almost nothing for about a day, and some containers restarted during the month. Totals around those times are low.</li>
+            <li>Suricata sees traffic in both directions, so its event counts include my own sensor's replies. I don't treat them as attack counts.</li>
+            <li>Country data shows where a server is hosted, not who's running it.</li>
+            <li>I never ran any of the malware. Samples stayed on the sensor, and I identified them by filename and hash.</li>
+            <li>Some interval figures are read off charts and rounded, and I say so where that happens.</li>
+        </ul>
+
+        <h2 id="volume">Attack volume and timeline</h2>
+        <p>The T-Pot ran for 30 days, from September 3 - October 3, 2026. Over that time frame, the honeypots received 7.85 million events averaging about 258,000 events a day, or about three events per second. The count covers all honeypot events while only excluding my management traffic.</p>
+
+        <figure>
+            <a href="../images/honeypot-threat-report-images/attacks-by-honeypot.png" target="_blank" rel="noopener noreferrer"><img src="../images/honeypot-threat-report-images/attacks-by-honeypot.png" alt="Kibana histogram of attack events per 12-hour interval for the five busiest honeypots from September 3 to October 3, 2026, showing RDP rising steadily, a large Ddospot spike in early September, two Heralding surges, and a gap around September 22nd"></a>
+            <figcaption>Figure 1. Attack events per 12-hour interval for the five highest-volume honeypots. Interval values in this section are read from this chart and rounded.</figcaption>
+        </figure>
+
+        <p><strong>Remote Desktop attention grew all month.</strong> RDP traffic roughly tripled, from about 20,000 events per 12-hour interval in the first week to between 55,000 and 77,000 in the last. That pattern is consistent with the sensor's address being added to more target lists the longer it stayed online.</p>
+
+        <p><strong>Short campaigns produced the biggest spikes.</strong></p>
+        <ul>
+            <li>Ddospot logged about two-thirds of its 1.39 million events between September 4th and the 6th. It peaked near 320,000 in a single interval, then dropped to a low baseline.</li>
+            <li>Heralding rose from a few thousand events per interval to as many as 155,000 during September 8th to the 12th. It surged again to about 150,000 during September 23rd to the 25th. Those two bursts account for most of its 1.22 million events.</li>
+            <li>Honeytrap held a steadier baseline of 25,000 to 40,000 per interval but roughly tripled on September 16th and 17th.</li>
+        </ul>
+
+        <p>The monthly total doesn't tell the full story on how traffic arrived to my honeypot. Ddospot and Heralding rank second and fourth by volume largely because of a few days of campaign activity. RDP's first place reflects sustained, growing attention.</p>
+
+        <p>There is a noticeable dip around September 22nd where all honeypots fell to almost zero attacks. This finding points to a service disruption, not an international holiday for cyber attackers. The unaccounted totals for this day will hurt the overall attack number, but I will not worry about them for now.</p>
+
+        <h2 id="sources">Source analysis</h2>
+        <p>Most of the traffic came from a short list of hosting companies. Contabo alone sent about 23% of all events, and the top 10 networks together sent 45%.</p>
+
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr><th>ASN</th><th>Network</th><th class="num">Events</th><th class="num">Share of all events</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td class="mono">51167</td><td class="col-attack">Contabo GmbH</td><td class="num mono">1,787,959</td><td class="num mono">22.8%</td></tr>
+                    <tr><td class="mono">14987</td><td class="col-attack">Rethem Hosting LLC</td><td class="num mono">320,963</td><td class="num mono">4.1%</td></tr>
+                    <tr><td class="mono">201814</td><td class="col-attack">MEVSPACE sp. z o.o.</td><td class="num mono">230,645</td><td class="num mono">2.9%</td></tr>
+                    <tr><td class="mono">49870</td><td class="col-attack">Alsycon B.V.</td><td class="num mono">202,382</td><td class="num mono">2.6%</td></tr>
+                    <tr><td class="mono">197170</td><td class="col-attack">TechTies Inc.</td><td class="num mono">193,732</td><td class="num mono">2.5%</td></tr>
+                    <tr><td class="mono">396982</td><td class="col-attack">Google LLC</td><td class="num mono">190,356</td><td class="num mono">2.4%</td></tr>
+                    <tr><td class="mono">8560</td><td class="col-attack">IONOS SE</td><td class="num mono">170,885</td><td class="num mono">2.2%</td></tr>
+                    <tr><td class="mono">57844</td><td class="col-attack">SPDNet Telekomunika</td><td class="num mono">155,066</td><td class="num mono">2.0%</td></tr>
+                    <tr><td class="mono">14956</td><td class="col-attack">RouterHosting LLC</td><td class="num mono">139,635</td><td class="num mono">1.8%</td></tr>
+                    <tr><td class="mono">23923</td><td class="col-attack">Agni Systems Limited</td><td class="num mono">132,558</td><td class="num mono">1.7%</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>Contabo's 1.79 million events were more than five times the next network's 321,000. Most of the top 10 are hosting or cloud companies, not home internet providers, so this traffic came from servers in data centers. Those servers may be rented by attackers or compromised; the data cannot tell which.</p>
+
+        <p>One network on that list needs an asterisk. SPDNet, a Turkish provider, only shows up in the DDoS honeypot's traffic, and that honeypot saw 319,098 different source addresses, far more than any other. In a reflection attack the source address is forged to point at the victim, so SPDNet was most likely on the receiving end, not doing the attacking.</p>
+
+        <p>Passive OS fingerprinting tells the same story. Most attacking hosts that p0f could identify fingerprinted as Linux, which is typical of servers rather than home PCs. The data suggests that traffic was concentrated at the address level too. The top ten IP addresses sent 1.54 million events, about a fifth of the total, and the busiest sent 537,381 on its own. Funny enough, the top IP, 5.189.128.x, is also owned by Contabo GmbH according to MXToolBox. This means that IP sent 6.8% of all attacker traffic, and also sent about 30% of the top offender's ASN traffic.</p>
+
+        <div class="table-scroll">
+            <table class="attacks-table compact">
+                <thead>
+                    <tr><th>Source address</th><th class="num">Events</th><th class="num">Share of all events</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td class="mono">5.189.128.x</td><td class="num mono">537,381</td><td class="num mono">6.8%</td></tr>
+                    <tr><td class="mono">194.50.16.x</td><td class="num mono">186,614</td><td class="num mono">2.4%</td></tr>
+                    <tr><td class="mono">149.50.115.x</td><td class="num mono">179,192</td><td class="num mono">2.3%</td></tr>
+                    <tr><td class="mono">119.148.49.x</td><td class="num mono">132,535</td><td class="num mono">1.7%</td></tr>
+                    <tr><td class="mono">213.136.71.x</td><td class="num mono">118,562</td><td class="num mono">1.5%</td></tr>
+                    <tr><td class="mono">144.172.97.x</td><td class="num mono">113,900</td><td class="num mono">1.5%</td></tr>
+                    <tr><td class="mono">77.83.38.x</td><td class="num mono">85,081</td><td class="num mono">1.1%</td></tr>
+                    <tr><td class="mono">84.32.50.x</td><td class="num mono">66,292</td><td class="num mono">0.8%</td></tr>
+                    <tr><td class="mono">80.94.95.x</td><td class="num mono">62,806</td><td class="num mono">0.8%</td></tr>
+                    <tr><td class="mono">62.169.25.x</td><td class="num mono">58,304</td><td class="num mono">0.7%</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>The IP addresses are partially redacted because many attacking hosts are compromised machines belonging to third parties and I do not believe that doxing them is the correct way to solve this issue.</p>
+
+        <p>France, the United States, Türkiye, the Netherlands and Germany were the top five source countries, followed by Poland, Bulgaria, Russia, Ukraine and China. The term country in this context means where a server is hosted, not where its operator sits. Similar to how I am located in Colorado but my honeypot is hosted in Seattle, Washington. It says more about data center locations than about who is attacking.</p>
+
+        <figure>
+            <a href="../images/honeypot-threat-report-images/attack-map-countries.png" target="_blank" rel="noopener noreferrer"><img src="../images/honeypot-threat-report-images/attack-map-countries.png" alt="T-Pot attack map with clusters over Europe and North America, above a histogram of attacks by country for France, the United States, Türkiye, the Netherlands and Germany"></a>
+            <figcaption>Figure 2. The attack map and attacks by country over the month. Türkiye's early spike lines up with the DDoS reflection burst, and France's two spikes line up with Heralding's surges.</figcaption>
+        </figure>
+
+        <p>Addresses already flagged as known attackers made up the largest share of events, ahead of bad-reputation addresses and mass scanners such as research crawlers.</p>
+
+        <figure>
+            <a href="../images/honeypot-threat-report-images/ip-reputation.png" target="_blank" rel="noopener noreferrer"><img src="../images/honeypot-threat-report-images/ip-reputation.png" alt="Donut chart of attacker source IP reputation, mostly known attackers, followed by bad reputation and mass scanners"></a>
+            <figcaption>Figure 3. Events by source IP reputation.</figcaption>
+        </figure>
+
+        <h2 id="credentials">Credential attacks</h2>
+        <p>Bots mostly guessed Windows administrator accounts and weak passwords, and "Administrator" was the most-tried username.</p>
+
+        <figure>
+            <a href="../images/honeypot-threat-report-images/username-cloud.png" target="_blank" rel="noopener noreferrer"><img src="../images/honeypot-threat-report-images/username-cloud.png" alt="Tagcloud of attempted usernames dominated by Administrator and administrator, with root, admin, sa, postgres and many others"></a>
+            <a href="../images/honeypot-threat-report-images/password-cloud.png" target="_blank" rel="noopener noreferrer"><img src="../images/honeypot-threat-report-images/password-cloud.png" alt="Tagcloud of attempted passwords dominated by blank, with 123456, password, P@ssw0rd, 345gs5662d34 and many others"></a>
+            <figcaption>Figure 4. Most-attempted usernames (top) and passwords (bottom). Word size reflects how often each was tried. My sensor's IP is blurred in the password cloud.</figcaption>
+        </figure>
+
+        <p>"Administrator" (275,951) and "administrator" (138,917) (capital and lowercase "a") were the two most-tried usernames, far ahead of root at 46,207. That fits RDP being the most-attacked service, since those are Windows account names. Database admin accounts drew heavy guessing too, led by sa, SQL Server's built-in administrator, at 14,043.</p>
+
+        <p>Some bots tried the admin account in other languages: administrador, administrateur, utente, usuario. Others guessed names a small office might use, such as buh (Russian shorthand for accountant) and sklad (warehouse). Cloud defaults like ubuntu and azureuser showed up as well, along with service accounts for postgres, oracle, mysql, git and even minecraft.</p>
+
+        <p>A blank password appears 545,271 times, but that comes from RDP connections, where the honeypot records a username but no password. I confirmed it by filtering to just the RDP honeypot, where the password field is blank. Among real guesses, 123456 led with 4,791 attempts, followed by 123, 1234, password and root.</p>
+
+        <p>Several common attempts would pass a typical Windows complexity rule yet are trivially guessed, such as P@ssw0rd (565 attempts), Admin@123, 1qaz@WSX and Aa123456. Complexity rules alone do not stop wordlist attacks.</p>
+
+        <p>The string 345gs5662d34 appeared as both a username and a password, alongside its variant 3245gs5662d34, at 530 and 524 attempts as passwords. It is a long-documented botnet marker seen in honeypots worldwide, and the <a href="https://isc.sans.edu/diary/30188" target="_blank" rel="noopener noreferrer">SANS Internet Storm Center</a> noted the username arrives with only one password. Its origin is disputed: some researchers tie it to <a href="https://blog.jonsdocs.org.uk/2025/09/26/honeypots-2025-three-countries/" target="_blank" rel="noopener noreferrer">Polycom CX600 IP phones</a>, others to <a href="https://github.com/Vr00mm/honeypot-writeup" target="_blank" rel="noopener noreferrer">DVR firmware</a>.</p>
+
+        <p>Router factory defaults also appear. One Telnet session logged in with e8ehome/e8ehome, a known router default, and is walked through in the <a href="#deep-dive">incident deep-dive</a>.</p>
+
+        <p>Some password entries are not passwords at all. Shell commands such as sh and linuxshell show up, likely from bots firing their command sequence before a login completed. One entry is an HTTP header aimed at the sensor's own Telnet port, from a scanner speaking the wrong protocol.</p>
+
+        <p>Beyond SSH, Telnet and RDP, Heralding logged 1.22 million events against the email, proxy, database and VNC services it emulated. Its captured credentials were mostly defaults against SOCKS5 proxies and PostgreSQL, led by postgres/postgres at 73 attempts. Its two big spikes line up with VNC traffic on port 5900, though VNC doesn't appear among its top captured credentials.</p>
+
+        <h2 id="post-login">Post-login behavior</h2>
+        <p>Once bots got into Cowrie's fake shell, they mostly did two things. They checked whether the box was worth using for crypto mining, and they tried to lock in their own SSH access.</p>
+
+        <p>Cowrie logged 650,857 events from about 6,800 addresses but only 78 distinct SSH client fingerprints (HASSH).</p>
+
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr><th>Command</th><th class="num">Times run</th><th>What it does</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>uname -a 2&gt;/dev/null</code></td><td class="num mono">755</td><td>Reports the operating system, hiding errors</td></tr>
+                    <tr><td><code>config terminal</code></td><td class="num mono">712</td><td>A router command; the bot assumed it had reached a network device</td></tr>
+                    <tr><td><code>uname -a</code></td><td class="num mono">577</td><td>Reports the operating system</td></tr>
+                    <tr><td><code>cd ~; chattr -ia .ssh; lockr -ia .ssh</code></td><td class="num mono">558</td><td>Unlocks the SSH key folder so it can be overwritten</td></tr>
+                    <tr><td><code>lockr -ia .ssh</code></td><td class="num mono">558</td><td>The same unlock, using a tool the botnet runs alongside chattr</td></tr>
+                    <tr><td><code>sh</code></td><td class="num mono">555</td><td>Tries to open a shell</td></tr>
+                    <tr><td><code>cat /proc/cpuinfo | grep name | wc -l</code></td><td class="num mono">550</td><td>Counts CPU cores</td></tr>
+                    <tr><td><code>uname -m</code></td><td class="num mono">546</td><td>Reports CPU architecture</td></tr>
+                    <tr><td><code>cat /proc/cpuinfo | grep model | grep name | wc -l</code></td><td class="num mono">544</td><td>Counts CPU cores a second way</td></tr>
+                    <tr><td><code>cat /proc/cpuinfo | grep name | head -n 1 | awk '{print $4,$5,$6,$7,$8,$9;}'</code></td><td class="num mono">544</td><td>Reads the CPU model name</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>The <code>uname</code> and <code>/proc/cpuinfo</code> commands pull the CPU architecture, core count and model. A miner installer needs exactly that to pick the right build and decide whether a box is worth the trouble. The miner samples Cowrie caught came in separate arm7, arm8 and i686 builds, so the architecture check is doing real work.</p>
+
+        <p>The <code>chattr</code> and <code>lockr</code> commands remove the immutable flag from the .ssh folder. That's the first step of the <a href="https://blog.port22.dk/mdrfckrs-part-two/" target="_blank" rel="noopener noreferrer">mdrfckr</a> campaign. Next it wipes the existing keys and adds its own, so the operator can log back in whenever they want. Researchers tie it to <a href="https://offseq.com/en/research/connection-is-not-an-exploit/" target="_blank" rel="noopener noreferrer">Outlaw, also tracked as Dota</a>, a Linux crypto-mining botnet whose SSH key was first seen in 2018.</p>
+
+        <p>Cowrie caught the full key install too, 557 times, which is nearly one for every unlock. It's the exact same public key <a href="https://blog.port22.dk/mdrfckrs-part-two/" target="_blank" rel="noopener noreferrer">other researchers have documented</a>, with mdrfckr tagged on the end.</p>
+
+        <p>The campaign hit steadily from September 4th to the 20th and peaked on the 19th. After the collection gap on the 21st I didn't see it once, and I can't tell whether the botnet moved on or something about the sensor changed after the restart.</p>
+
+        <p>One session from September 19th shows the whole script from start to finish, and it only took 17 seconds.</p>
+
+        <figure>
+            <a href="../images/honeypot-threat-report-images/mdrfckr-session.png" target="_blank" rel="noopener noreferrer"><img src="../images/honeypot-threat-report-images/mdrfckr-session.png" alt="Kibana Discover view of one Cowrie session on September 19th, showing an SSH login as ftp with password 123456, the chattr and lockr unlock, the mdrfckr SSH key install, a password change, and a run of system checks"></a>
+            <figcaption>Figure 5. One mdrfckr session from September 19th, newest event at the top.</figcaption>
+        </figure>
+
+        <p>The bot logged in over SSH as "ftp" with the password "123456", unlocked .ssh, wiped it and planted the mdrfckr key. Then it changed the account's password to "27BUj3kJAikq" so nobody could get back in with the old one. I could not find that password in any public sources, so it may be a previously undocumented indicator.</p>
+
+        <p>After that it ran more than a dozen checks: CPU count and model, memory, disk size, running processes, who else was logged in, and whether any cron jobs already existed. It even checked the size of the ls binary, probably to figure out whether it was on a real system. Each command arrived as its own SSH request a little over half a second after the last.</p>
+
+        <p>Six of the ten commands in the table above come from this one script, which is why their counts are nearly identical.</p>
+
+        <p><code>config terminal</code> came in second at 712. It's the same thing I saw in the deep-dive session: bots throwing router commands at whatever answers, without checking what it is.</p>
+
+        <h2 id="services">Services and exploits</h2>
+        <p>Remote Desktop took the most punishment, about a quarter of all events on its own. Actual exploit attempts barely showed up. This was a month of password guessing and scanning.</p>
+
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr><th>Honeypot</th><th>Pretends to be</th><th class="num">Events</th><th class="num">Share</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td class="col-attack">RDPHoneypot</td><td>Windows Remote Desktop (3389)</td><td class="num mono">1,887,868</td><td class="num mono">24.1%</td></tr>
+                    <tr><td class="col-attack">Ddospot</td><td>DNS, NTP, SSDP and CHARGEN over UDP</td><td class="num mono">1,391,114</td><td class="num mono">17.7%</td></tr>
+                    <tr><td class="col-attack">Honeytrap</td><td>Any TCP port nothing else is using</td><td class="num mono">1,305,044</td><td class="num mono">16.6%</td></tr>
+                    <tr><td class="col-attack">Heralding</td><td>Email, SOCKS5 proxy, PostgreSQL, VNC</td><td class="num mono">1,219,245</td><td class="num mono">15.5%</td></tr>
+                    <tr><td class="col-attack">Sentrypeer</td><td>SIP phone systems (5060)</td><td class="num mono">678,578</td><td class="num mono">8.6%</td></tr>
+                    <tr><td class="col-attack">Cowrie</td><td>SSH and Telnet (22, 23)</td><td class="num mono">650,857</td><td class="num mono">8.3%</td></tr>
+                    <tr><td class="col-attack">Dionaea</td><td>SMB, SQL Server, MySQL, FTP and others</td><td class="num mono">304,899</td><td class="num mono">3.9%</td></tr>
+                    <tr><td class="col-attack">ConPot</td><td>Industrial control equipment</td><td class="num mono">166,915</td><td class="num mono">2.1%</td></tr>
+                    <tr><td class="col-attack">Ciscoasa</td><td>Cisco ASA VPN</td><td class="num mono">65,327</td><td class="num mono">0.8%</td></tr>
+                    <tr><td class="col-attack">H0neytr4p</td><td>HTTPS web server</td><td class="num mono">64,528</td><td class="num mono">0.8%</td></tr>
+                    <tr><td class="col-attack">Honeyaml</td><td>Web API</td><td class="num mono">49,467</td><td class="num mono">0.6%</td></tr>
+                    <tr><td class="col-attack">Tanner</td><td>Web application</td><td class="num mono">40,927</td><td class="num mono">0.5%</td></tr>
+                    <tr><td class="col-attack">Redishoneypot</td><td>Redis database</td><td class="num mono">12,963</td><td class="num mono">0.2%</td></tr>
+                    <tr><td class="col-attack">Adbhoney</td><td>Android Debug Bridge (5555)</td><td class="num mono">4,589</td><td class="num mono">0.1%</td></tr>
+                    <tr><td class="col-attack">Miniprint</td><td>Network printer (9100)</td><td class="num mono">3,529</td><td class="num mono">&lt;0.1%</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>Who hit what</h3>
+        <p>The networks behind each service were surprisingly specialized. Pulling the top sources from each honeypot's dashboard:</p>
+
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr><th>Service</th><th>Top networks</th><th>What they are</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td class="col-attack">RDP</td><td>Contabo, MEVSPACE, ReliableSite.Net</td><td>Hosting companies</td></tr>
+                    <tr><td class="col-attack">SIP</td><td>Cherry Servers, IONOS, RouterHosting</td><td>Hosting companies</td></tr>
+                    <tr><td class="col-attack">SSH and Telnet</td><td>TechTies, Banatsync, Kabat</td><td>Led by a data center</td></tr>
+                    <tr><td class="col-attack">DDoS reflection</td><td>SPDNet and other Turkish networks</td><td>Probably victims, with forged addresses</td></tr>
+                    <tr><td class="col-attack">SMB</td><td>Chinanet, China Mobile, China Telecom, PLDT</td><td>Regular consumer and national ISPs</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>The type of network lines up with the type of attack. RDP and SIP brute force came from rented servers, which is what you'd expect from someone running a campaign. SMB came from ordinary ISP ranges across Asia and South America, which looks more like infected PCs spreading on their own.</p>
+
+        <h3>RDP</h3>
+        <p>RDP pulled 1.89 million events from only about 1,700 addresses, roughly a thousand attempts each. The single busiest address, a Contabo server, sent 537,381 of them. Almost every connection had a blank client hostname, but one leaked a name, EMP-LAP-0015, which reads like a company laptop. I can't tell whether that machine was hijacked or belongs to whoever ran the attack.</p>
+
+        <h3>DDoS reflection</h3>
+        <p>Ddospot pretends to be the kind of UDP services attackers bounce traffic off in reflection attacks. Almost all of its traffic was DNS on port 53, and nearly every DNS request asked about the same domain, dhitc[.]com. The NTP requests included monlist, an old command that makes a server send back far more data than it received, and the SSDP requests were M-SEARCH discovery packets.</p>
+        <p>The sources are the interesting part. Ddospot logged about 319,000 different addresses, roughly four requests each, concentrated in Turkish networks. In a reflection attack the attacker forges the victim's address as the source, so this looks like an attack on Turkish networks that used my sensor as one of its reflectors. Most of it landed between September 4th and the 6th, and Suricata's alerts spiked at the same time, peaking at 1,269,692 in the 12 hours starting September 6th.</p>
+        <p>After the collection window I sent Ddospot a test DNS query, and it answered with a normal-looking reply. So my sensor probably sent some reflected traffic toward those networks during the attack. That's the one part of this setup I'd change: next time I'd find a way to log these requests without answering them, or leave Ddospot out.</p>
+
+        <h3>Honeytrap</h3>
+        <p>Honeytrap answers on any port nothing else is using, and its 1.3 million events were spread thin across a long tail of ports. Even the busiest port topped out under 3,000 events in any 12-hour window. That was 5038, the Asterisk Manager Interface used to control Asterisk phone systems, which ties into the toll fraud below. The rest of the top five were 8000, 8081, 9090 and 8888, common ports for web admin panels and proxies.</p>
+        <p>Port 5038's busiest windows, September 8th to the 11th and September 23rd, line up with Heralding's spikes, so the same campaigns may have been sweeping several services at once.</p>
+
+        <h3>SIP and VoIP</h3>
+        <p>Sentrypeer's 678,578 events came from roughly 600 addresses, and most were INVITE requests, which try to place a call. That's likely toll fraud. Attackers look for phone systems that will route their calls, then dial premium-rate numbers they get a cut of.</p>
+        <p>The tools mostly pretended to be real phones from Cisco, Linksys and Avaya. One didn't bother hiding and called itself SipSlaughter. The biggest source was Cherry Servers across three of its networks, about 206,000 events combined, ahead of IONOS and RouterHosting.</p>
+        <p>The same interest showed up in database guessing. Dionaea saw logins for accounts that VoIP software uses, like asterisk, fusionpbx, kamailio and opensips.</p>
+
+        <h3>SMB</h3>
+        <p>Dionaea logged 304,899 events, and most of them were SMB on port 445. These came from regular ISPs: Chinanet, China Mobile, China Telecom, PLDT in the Philippines, and providers in Bolivia, Iran and Pakistan. That spread looks like infected computers scanning for new victims on their own, the way SMB worms have kept circulating since WannaCry in 2017. Dionaea also caught SQL Server guessing, mostly against the sa account.</p>
+
+        <h3>Proxy hunting</h3>
+        <p>Some of the traffic was checking whether my server would relay traffic for someone else. Besides the SOCKS5 password guessing in Heralding, web requests asked my server to fetch IP-echo sites like icanhazip[.]com, api64[.]ipify[.]org and checkip[.]amazonaws[.]com, which is how bots test for open proxies. One of those checks pointed at proxychecker[.]vultr[.]com, so Vultr was probably testing its own customers too.</p>
+
+        <h3>Exploits barely showed up</h3>
+        <p>Out of about 89 million Suricata events, only 16 alerts matched a known CVE.</p>
+
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr><th>CVE</th><th class="num">Alerts</th><th>What it is</th><th>Published</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td class="mono">CVE-2022-37055</td><td class="num mono">1</td><td><a href="https://www.tenable.com/cve/CVE-2022-37055" target="_blank" rel="noopener noreferrer">Buffer overflow in D-Link GO-RT-AC750 routers</a>, added to CISA's Known Exploited Vulnerabilities list in December 2025</td><td>August 2022</td></tr>
+                    <tr><td class="mono">CVE-2020-11910</td><td class="num mono">15</td><td><a href="https://www.rockwellautomation.com/en-us/trust-center/security-advisories/advisory.PN1508.html" target="_blank" rel="noopener noreferrer">Ripple20 flaw in the ICMPv4 handling of Treck's embedded TCP/IP stack</a></td><td>June 2020</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>The Ripple20 alerts may just be malformed ICMP tripping the rule, since nothing on the sensor runs Treck's stack. Suricata only tags what its rules recognize, so this undercounts, but the gap between 16 and millions of login attempts is hard to miss.</p>
+        <p>Most of Suricata's busiest alerts were about truncated or out-of-order packets, which is network noise. Its single biggest source address was my own sensor, because Suricata watches traffic in both directions.</p>
+
+        <h2 id="malware">Malware and payloads</h2>
+        <p>Nearly everything I could identify was a crypto miner. Bots dropped miners built for Linux servers and Android devices, plus a few loader scripts I haven't identified yet. Over the month Cowrie saved 61 distinct files with content, Adbhoney 24 and Dionaea 47.</p>
+
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr><th>Payload</th><th>Caught by</th><th>Downloads</th><th>What it is</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td class="mono">kla.sh</td><td>Cowrie</td><td class="mono">116</td><td>Unidentified loader script</td></tr>
+                    <tr><td class="mono">redtail.arm7, redtail.arm8, redtail.i686</td><td>Cowrie</td><td class="mono">20 each</td><td>RedTail Monero miner</td></tr>
+                    <tr><td class="mono">clean.sh</td><td>Cowrie</td><td class="mono">20</td><td>RedTail's prep script</td></tr>
+                    <tr><td>Five files named <span class="mono">sshd</span></td><td>Cowrie</td><td class="mono">1 to 5 each</td><td>Four unidentified, one empty</td></tr>
+                    <tr><td class="mono">bot.$m</td><td>Cowrie</td><td class="mono">2 each, from three ports</td><td>Unidentified bot loader</td></tr>
+                    <tr><td>Ten .raw samples</td><td>Adbhoney</td><td class="mono">5 to 31 each</td><td>Tied to Trinity, also called UFO Miner</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>RedTail</h3>
+        <p>The RedTail files match a package <a href="https://isc.sans.edu/diary/31472" target="_blank" rel="noopener noreferrer">other honeypot operators have documented</a>. It gets in by guessing SSH passwords, clean.sh clears out competing miners, and a setup script picks the build that fits the CPU. The miner itself is built on XMRig, an open-source Monero miner. That's why the CPU checks in the post-login section matter: the bot needs to know which build to run. My builds don't match the RedTail hashes other honeypot operators have published, which fits reports that its builds change often.</p>
+        <p>When I searched for it, setup.sh turned up too. It just fell outside the top downloads. I haven't seen an x86_64 build, which other researchers usually find in the same package.</p>
+
+        <h3>Loader scripts</h3>
+        <p>The most-downloaded file was kla.sh, pulled from 160[.]119[.]66[.]206 out of a folder called /bins/, a layout IoT botnet loaders tend to use. The bot.$m downloads came from 176[.]65[.]134[.]121 on ports 7338, 7450 and 8080. The $m was supposed to be replaced with the CPU type before the request went out, and it wasn't, probably because Cowrie's fake shell never ran the command that sets it.</p>
+        <p>The five files named sshd are a different trick. Naming malware after the SSH service helps it blend into a process list. One of them hashed to the SHA-256 of an empty file, so that download came back with nothing.</p>
+
+        <h3>UFO Miner on Android</h3>
+        <p>Adbhoney pretends to be an Android device with its debug port open on 5555. It logged 4,589 events from about 440 addresses, and the commands match <a href="https://www.keysight.com/blogs/en/tech/nwvs/2020/11/22/trinityp2p-malware-over-adb" target="_blank" rel="noopener noreferrer">Trinity</a> almost line for line: clear /data/local/tmp, push and run a binary called trinity, install ufo.apk, then start com.ufo.miner. UFO Miner is a <a href="https://news.sophos.com/?p=56304" target="_blank" rel="noopener noreferrer">headless mining app</a> that spreads to any Android device it can reach over that port, and it's been around since 2018.</p>
+
+        <h3>SMB payloads</h3>
+        <p>Dionaea saved 47 distinct binaries pushed to it over SMB. I haven't identified them yet, so I'm not naming any families here. One of Dionaea's rotated archives was incomplete, so a few samples may be missing from that count.</p>
+
+        <h2 id="attack-mapping">MITRE ATT&amp;CK mapping</h2>
+        <p>I only mapped techniques I can point to in the data, and every row lists the evidence behind it. These are from the attacker's side, and many are only attempts, since nothing real got compromised.</p>
+
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr><th>ID</th><th>Technique</th><th>What I saw</th><th>Where</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1595/002/" target="_blank" rel="noopener noreferrer">T1595.002</a></td><td>Active Scanning: Vulnerability Scanning</td><td>Probes matching CVE-2022-37055 and CVE-2020-11910</td><td>Suricata</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1110/001/" target="_blank" rel="noopener noreferrer">T1110.001</a></td><td>Brute Force: Password Guessing</td><td>Hundreds of thousands of guesses against Administrator and root</td><td>RDPHoneypot, Cowrie, Heralding</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1078/001/" target="_blank" rel="noopener noreferrer">T1078.001</a></td><td>Valid Accounts: Default Accounts</td><td>Logins with factory defaults like e8ehome/e8ehome and postgres/postgres</td><td>Cowrie, Heralding</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1059/004/" target="_blank" rel="noopener noreferrer">T1059.004</a></td><td>Command and Scripting Interpreter: Unix Shell</td><td>Scripted command sequences right after login</td><td>Cowrie</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1082/" target="_blank" rel="noopener noreferrer">T1082</a></td><td>System Information Discovery</td><td>uname and /proc/cpuinfo checks, about 550 runs</td><td>Cowrie</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1033/" target="_blank" rel="noopener noreferrer">T1033</a></td><td>System Owner/User Discovery</td><td>whoami and w in the mdrfckr script</td><td>Cowrie</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1057/" target="_blank" rel="noopener noreferrer">T1057</a></td><td>Process Discovery</td><td>top in the mdrfckr script</td><td>Cowrie</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1222/002/" target="_blank" rel="noopener noreferrer">T1222.002</a></td><td>File and Directory Permissions Modification: Linux and Mac</td><td>chattr -ia .ssh, 558 times</td><td>Cowrie</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1098/004/" target="_blank" rel="noopener noreferrer">T1098.004</a></td><td>Account Manipulation: SSH Authorized Keys</td><td>The mdrfckr key written to authorized_keys, 557 times</td><td>Cowrie</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1531/" target="_blank" rel="noopener noreferrer">T1531</a></td><td>Account Access Removal</td><td>Account password changed to 27BUj3kJAikq after takeover</td><td>Cowrie</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1105/" target="_blank" rel="noopener noreferrer">T1105</a></td><td>Ingress Tool Transfer</td><td>kla.sh, RedTail builds, bot.$m and ufo.apk</td><td>Cowrie, Adbhoney</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1496/001/" target="_blank" rel="noopener noreferrer">T1496.001</a></td><td>Resource Hijacking: Compute Hijacking</td><td>RedTail and UFO Miner</td><td>Cowrie, Adbhoney</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1498/002/" target="_blank" rel="noopener noreferrer">T1498.002</a></td><td>Network Denial of Service: Reflection Amplification</td><td>DNS, NTP monlist and SSDP requests with forged sources</td><td>Ddospot</td></tr>
+                    <tr><td class="col-mitre mono"><a href="https://attack.mitre.org/techniques/T1190/" target="_blank" rel="noopener noreferrer">T1190</a></td><td>Exploit Public-Facing Application</td><td>One D-Link router exploit attempt</td><td>Suricata</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>SIP toll fraud doesn't map cleanly to any ATT&amp;CK technique, so I covered it in the services section instead of forcing a fit.</p>
+
+        <h2 id="deep-dive">Incident deep-dive: one bot, half a second</h2>
+        <p>One Telnet session on October 3rd shows how little a bot needs. It logged in, fired off its whole script in a few milliseconds, and left 13 seconds later.</p>
+
+        <div class="table-scroll">
+            <table class="attacks-table compact">
+                <thead>
+                    <tr><th>Time</th><th>What happened</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td class="mono">03:49:27.041</td><td>Connection opens from 178.141.242.x</td></tr>
+                    <tr><td class="mono">03:49:28.308</td><td>Telnet setup</td></tr>
+                    <tr><td class="mono">03:49:28.309</td><td>Logs in as e8ehome with the password e8ehome</td></tr>
+                    <tr><td class="mono">03:49:28.813</td><td>Starts sending commands: start, enable</td></tr>
+                    <tr><td class="mono">03:49:28.814</td><td>config terminal, system</td></tr>
+                    <tr><td class="mono">03:49:28.815</td><td>linuxshell, shell, su</td></tr>
+                    <tr><td class="mono">03:49:28.816</td><td>sh</td></tr>
+                    <tr><td class="mono">03:49:28.817</td><td>Probes for a writable folder, then checks for BusyBox</td></tr>
+                    <tr><td class="mono">03:49:41.771</td><td>Disconnects without downloading anything</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="table-note">Times are UTC.</p>
+
+        <figure>
+            <a href="../images/honeypot-threat-report-images/e8ehome-session.png" target="_blank" rel="noopener noreferrer"><img src="../images/honeypot-threat-report-images/e8ehome-session.png" alt="Kibana Discover view of the e8ehome Telnet session on October 3rd, showing the login, the burst of router commands, the writable-folder probe and the disconnect"></a>
+            <figcaption>Figure 6. The full e8ehome session in Kibana, newest event at the top.</figcaption>
+        </figure>
+
+        <h3>The login</h3>
+        <p>The bot got in on its first try with e8ehome/e8ehome. That's the factory default on the <a href="https://securityonline.info/trendmicro-mirai-like-scanning-from-china-targets-brazil/" target="_blank" rel="noopener noreferrer">Huawei E8C</a>, a home router China Telecom handed out, and it's been in Mirai-style credential lists for years. <a href="https://www.netscout.com/blog/asert/dipping-honeypot" target="_blank" rel="noopener noreferrer">NETSCOUT's honeypot research</a> listed it among the most common logins that weren't in the original Mirai source. On my sensor it came up in 37 sessions from 30 different addresses over the month.</p>
+
+        <h3>The command burst</h3>
+        <p>Half a second after logging in, the bot sent nine commands within about four milliseconds. Nothing human can type that fast.</p>
+        <p>The first eight are router commands. The bot assumed it had landed in a locked-down router menu and tried every way it knew to break out to a real Linux shell. Cowrie pretends to be a plain Linux server, so it rejected most of them, and the bot never stopped to check what it was talking to.</p>
+
+        <h3>The writable-folder probe</h3>
+        <p>The last command tries to create an empty hidden file in one folder after another, then moves into the first one where that works:</p>
+        <pre><code><span class="tok-op">&gt;</span>/var/run/.x<span class="tok-op">&amp;&amp;</span><span class="tok-cmd">cd</span> /var/run<span class="tok-punc">;</span><span class="tok-op">&gt;</span>/mnt/.x<span class="tok-op">&amp;&amp;</span><span class="tok-cmd">cd</span> /mnt<span class="tok-punc">;</span><span class="tok-op">&gt;</span>/usr/.x<span class="tok-op">&amp;&amp;</span><span class="tok-cmd">cd</span> /usr<span class="tok-punc">;</span><span class="tok-op">&gt;</span>/dev/.x<span class="tok-op">&amp;&amp;</span><span class="tok-cmd">cd</span> /dev<span class="tok-punc">;</span><span class="tok-op">&gt;</span>/dev/shm/.x<span class="tok-op">&amp;&amp;</span><span class="tok-cmd">cd</span> /dev/shm<span class="tok-punc">;</span><span class="tok-op">&gt;</span>/tmp/.x<span class="tok-op">&amp;&amp;</span><span class="tok-cmd">cd</span> /tmp<span class="tok-punc">;</span><span class="tok-op">&gt;</span>/var/.x<span class="tok-op">&amp;&amp;</span><span class="tok-cmd">cd</span> /var<span class="tok-punc">;</span><span class="tok-fn">/bin/busybox</span> <span class="tok-cmd">echo</span> <span class="tok-param">-e</span> <span class="tok-str">'\x44\x4a\x43\x48\x43\x48'</span></code></pre>
+        <p>It works through seven folders, from /var/run to /var, looking for somewhere it can write a payload. Then it runs BusyBox's echo with an escaped string that decodes to DJCHCH. If DJCHCH comes back, the bot knows it's on a real BusyBox system and can read the output, a trick common in Mirai-family loaders. The session ended 13 seconds later with nothing downloaded, so it probably didn't get the answer it was looking for.</p>
+
+        <h3>What it was</h3>
+        <p>Everything here fits a Mirai-family bot: Telnet, a router default password, a router escape sequence and a writable-folder probe. I didn't capture a binary from this session, so I can't name the exact variant.</p>
+
+        <h2 id="recommendations">Recommendations</h2>
+        <p>If you run a small business, start by finding out what you're exposing. Look up your public IP on Shodan, or ask your MSP to scan it from the outside. Then, in rough order of impact:</p>
+        <ol>
+            <li><strong>Get RDP off the internet.</strong> It was the most-attacked service by far, and the attacks kept growing the longer the sensor was up. Put it behind a VPN or a Remote Desktop Gateway with MFA, and close 3389 at the firewall.</li>
+            <li><strong>Turn on MFA and stop leaning on password complexity.</strong> P@ssw0rd and Admin@123 pass a standard complexity policy and still sit in attacker wordlists. Long passphrases plus MFA hold up much better.</li>
+            <li><strong>Rename or disable the built-in Administrator account and set a lockout policy.</strong> Administrator was tried 275,951 times, and bots also guessed it in other languages and tried role accounts like accounting and warehouse logins.</li>
+            <li><strong>Close SMB (445) to the internet and keep Windows patched.</strong> The SMB traffic looked like infected machines spreading on their own, the same kind of worm traffic that's been around since WannaCry.</li>
+            <li><strong>Change router and IoT default passwords and turn off Telnet and remote management.</strong> A bot logged into my sensor in half a second with a router's factory password.</li>
+            <li><strong>Lock down phone systems.</strong> Don't expose SIP or the Asterisk Manager port (5038) to the internet, accept traffic only from your VoIP provider, block international and premium-rate calling you don't need, and set spending alerts with your provider.</li>
+            <li><strong>Keep databases off the internet.</strong> SQL Server's sa account and postgres/postgres were both guessed. Databases should only listen on internal networks.</li>
+            <li><strong>Use SSH keys, turn off password logins and watch authorized_keys.</strong> The mdrfckr bot wiped and replaced SSH keys 557 times on my sensor, then changed the account password. An alert on changes to authorized_keys, or on chattr being run, would catch it.</li>
+            <li><strong>Don’t expose recursive DNS, unnecessary NTP, or SSDP services to the internet. If public DNS or NTP is required, configure it so it cannot be abused for amplification.</strong> Those services are what attackers bounce DDoS traffic off, and an exposed one makes you part of someone else's attack. My own sensor is proof of that.</li>
+            <li><strong>Consider limiting hosting networks on exposed admin services.</strong> A handful of hosting companies sent nearly half of all traffic. If your remote access only needs to work from home and office connections, you can be much stricter with data center ranges.</li>
+        </ol>
+
+        <h2 id="appendix">Appendix</h2>
+
+        <h3>Indicators of compromise</h3>
+        <p>Network indicators are defanged, and I've left out full attacking addresses since many belong to compromised machines.</p>
+
+        <div class="table-scroll">
+            <table class="attacks-table">
+                <thead>
+                    <tr><th>Type</th><th>Indicator</th><th>Context</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td class="col-attack">URL</td><td><code>hxxp://160.119.66[.]206/bins/kla.sh</code></td><td>Loader script, 116 downloads</td></tr>
+                    <tr><td class="col-attack">URL</td><td><code>hxxp://176.65.134[.]121:7338/bot.$m</code></td><td>Bot loader</td></tr>
+                    <tr><td class="col-attack">URL</td><td><code>hxxp://176.65.134[.]121:7450/bot.$m</code></td><td>Bot loader</td></tr>
+                    <tr><td class="col-attack">URL</td><td><code>hxxp://176.65.134[.]121:8080/bot.$m</code></td><td>Bot loader</td></tr>
+                    <tr><td class="col-attack">SSH key</td><td><code>SHA256:MkYY9qiVsFGBC5WkjoClCkwEFW5iSjcGQF7m4n4H7Cw</code></td><td>The captured mdrfckr key, same fingerprint as reported by <a href="https://offseq.com/en/research/connection-is-not-an-exploit/" target="_blank" rel="noopener noreferrer">OffSeq</a></td></tr>
+                    <tr><td class="col-attack">Credential</td><td><code>27BUj3kJAikq</code></td><td>Password the mdrfckr script set on the hijacked account</td></tr>
+                    <tr><td class="col-attack">Credential</td><td><code>345gs5662d34</code> and <code>3245gs5662d34</code></td><td>Long-running botnet credential marker</td></tr>
+                    <tr><td class="col-attack">Credential</td><td><code>e8ehome</code> / <code>e8ehome</code></td><td>Huawei E8C router default</td></tr>
+                    <tr><td class="col-attack">DNS query</td><td><code>dhitc.com</code></td><td>Domain in nearly all DDoS reflection requests</td></tr>
+                    <tr><td class="col-attack">Android package</td><td><code>com.ufo.miner</code></td><td>UFO Miner</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>Adbhoney sample hashes, taken from its saved filenames:</p>
+        <pre><code><span class="tok-param">sha256,downloads</span>
+d7188b8c575367e10ea8b36ec7cca067ef6ce6d26ffa8c74b3faa0b14ebb8ff0,<span class="tok-num">31</span>
+a1b6223a3ecb37b9f7e4a52909a08d9fd8f8f80aee46466127ea0f078c7f5437,<span class="tok-num">27</span>
+0d3c687ffc30e185b836b99bd07fa2b0d460a090626f6bbbd40a95b98ea70257,<span class="tok-num">25</span>
+76ae6d577ba96b1c3a1de8b21c32a9faf6040f7e78d98269e0469d896c29dc64,<span class="tok-num">25</span>
+76c3ad51a52899878a89cb49cbfc034aa810f837d893a8bff63dfa6af788f4ef,<span class="tok-num">18</span>
+20e2c56d71fcaa1efa7a37e8e30211cd80fb7ff9394ba32df8d435e5c85eb963,<span class="tok-num">8</span>
+418d66ed005919a06e2e701b09c03d25819ae21c7b0ea6c83727bd3aa9307e75,<span class="tok-num">8</span>
+608ee011537005f368c9731f4c4dee6a247b620cde52908ed0678df28c617971,<span class="tok-num">5</span>
+7a48c93c5cb63a09505a009260d1cca8203285e0c1c6ff5b0df9cbb470820865,<span class="tok-num">5</span>
+8cd11b6e3504363d2818cfa541698af18f80be3552e038dfa9369c0ba28c6817,<span class="tok-num">5</span></code></pre>
+
+        <p>Cowrie samples I could match to a filename:</p>
+        <pre><code><span class="tok-param">file,sha256,downloads</span>
+<span class="tok-var">kla.sh</span>,39be6853a8204ce6455a373a6ffb4cb4672d4a62d90be69f7d6eeb66cda10b96,<span class="tok-num">116</span>
+<span class="tok-var">clean.sh</span>,3f3a11bafabb1a35db913cfe51995f2e357d049e268860175876ae5a93d23892,<span class="tok-num">20</span>
+<span class="tok-var">redtail.arm7</span>,d70f917e35813a7ae323e6b2b539d6dbbfc3a3a6599f1fed93430b14ca08b141,<span class="tok-num">20</span>
+<span class="tok-var">redtail.arm8</span>,d1cac82f44b54b0fd244a9e4122811e9ae108a197c7a65a20fd2e7552683e68e,<span class="tok-num">20</span>
+<span class="tok-var">redtail.i686</span>,8e1a67a5c03b3cd818f046c7a1605afccc0ee5ce437a0d099881f1872b54bc70,<span class="tok-num">20</span>
+<span class="tok-var">sshd</span>,94f2e4d8d4436874785cd14e6e6d403507b8750852f7f2040352069a75da4c00,<span class="tok-num">5</span>
+<span class="tok-var">sshd</span>,058e3183b7fa10cfb11bf34fed5ddce5a7a9848c14ade10297a31dc49bcd3691,<span class="tok-num">2</span>
+<span class="tok-var">sshd</span>,09805e2bf3d471395caa6406a11f45f211f4faec19187713550bc816b50698a7,<span class="tok-num">1</span>
+<span class="tok-var">sshd</span>,1d27289b1bc725c3ff2eac41a1b95036db76c3e4e40d3f227a92bf8274e6d6f9,<span class="tok-num">1</span></code></pre>
+
+        <p>A fifth sshd download hashed to <code>e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</code>, the SHA-256 of an empty file, so I left it out.</p>
+
+        <h3>Sensor and tools</h3>
+        <div class="table-scroll">
+            <table class="attacks-table compact">
+                <thead>
+                    <tr><th>Component</th><th>Version or detail</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td class="col-attack">Host</td><td>Vultr VPS in Seattle, 4 vCPU, 16 GB RAM, 240 GB NVMe</td></tr>
+                    <tr><td class="col-attack">Operating system</td><td>Debian 13, kernel 6.12</td></tr>
+                    <tr><td class="col-attack">T-Pot</td><td>24.04.1, custom honeypot selection</td></tr>
+                    <tr><td class="col-attack">Cowrie</td><td class="mono">3.0.1</td></tr>
+                    <tr><td class="col-attack">Heralding</td><td class="mono">1.0.7</td></tr>
+                    <tr><td class="col-attack">Honeytrap</td><td class="mono">1.1.0</td></tr>
+                    <tr><td class="col-attack">Suricata</td><td>68,565 rules loaded at startup</td></tr>
+                    <tr><td class="col-attack">Elastic Stack</td><td>9.x, as shipped with T-Pot</td></tr>
+                    <tr><td class="col-attack">Tailscale</td><td class="mono">1.102.3</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>Sources</h3>
+        <ul>
+            <li>SANS Internet Storm Center, <a href="https://isc.sans.edu/diary/30188" target="_blank" rel="noopener noreferrer">Common usernames submitted to honeypots</a></li>
+            <li>SANS Internet Storm Center, <a href="https://isc.sans.edu/diary/31472" target="_blank" rel="noopener noreferrer">RedTail guest diary</a></li>
+            <li>Jon's Docs, <a href="https://blog.jonsdocs.org.uk/2025/09/26/honeypots-2025-three-countries/" target="_blank" rel="noopener noreferrer">Honeypots 2025: three countries</a></li>
+            <li>Vr00mm, <a href="https://github.com/Vr00mm/honeypot-writeup" target="_blank" rel="noopener noreferrer">Five months of an SSH honeypot</a></li>
+            <li>port22, <a href="https://blog.port22.dk/mdrfckrs-part-two/" target="_blank" rel="noopener noreferrer">mdrfckrs, part two</a></li>
+            <li>OffSeq, <a href="https://offseq.com/en/research/connection-is-not-an-exploit/" target="_blank" rel="noopener noreferrer">A connection is not an exploit</a></li>
+            <li>Tenable, <a href="https://www.tenable.com/cve/CVE-2022-37055" target="_blank" rel="noopener noreferrer">CVE-2022-37055</a></li>
+            <li>Rockwell Automation, <a href="https://www.rockwellautomation.com/en-us/trust-center/security-advisories/advisory.PN1508.html" target="_blank" rel="noopener noreferrer">Treck Ripple20 advisory</a></li>
+            <li>Keysight, <a href="https://www.keysight.com/blogs/en/tech/nwvs/2020/11/22/trinityp2p-malware-over-adb" target="_blank" rel="noopener noreferrer">Trinity: P2P malware over ADB</a></li>
+            <li>Sophos, <a href="https://news.sophos.com/?p=56304" target="_blank" rel="noopener noreferrer">Automated Android attacks deliver UFO cryptominer</a></li>
+            <li>SecurityOnline, <a href="https://securityonline.info/trendmicro-mirai-like-scanning-from-china-targets-brazil/" target="_blank" rel="noopener noreferrer">Mirai-like scanning from China targets Brazil</a></li>
+            <li>NETSCOUT, <a href="https://www.netscout.com/blog/asert/dipping-honeypot" target="_blank" rel="noopener noreferrer">Dipping into the honeypot</a></li>
+        </ul>
+        <a class="back-link" href="../docs.html">&larr; Back to Documentation</a>
+    </article>
+
+    <footer>
+        <p>&copy; 2026 Hunter Weygandt</p>
+    </footer>
+
+    <script src="../circuit.js"></script>
+
+</body>
+</html>

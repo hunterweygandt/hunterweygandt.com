@@ -510,3 +510,36 @@ ol ol li::before {
 .filetree .dir  { color: #a855f7; font-weight: 600; }   /* folders */
 .filetree .tree { color: #4b4b55; }                     /* the ├── │ └── lines */
 .filetree .cmt  { color: #6a6a76; }                     /* (annotations) */
+/* Honeypot threat report ----------------------------------------- */
+.report h2 { scroll-margin-top: 20px; }
+.report h3 { color: #fff; font-size: 1.1rem; margin: 28px 0 10px; }
+.report a { color: #a855f7; text-decoration: none; }
+.report a:hover { text-decoration: underline; }
+.report p strong,
+.report li strong { color: #e0e0e0; }
+.report ul,
+.report ol { margin-bottom: 16px; }
+.report li { margin-bottom: 6px; }
+.report .table-scroll { margin: 24px 0; }
+.report .attacks-table .num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.report .attacks-table code {
+  font-family: var(--at-mono);
+  font-size: 0.84rem;
+  color: #a855f7;
+  background: none;
+  padding: 0;
+  overflow-wrap: break-word;
+}
+.report .table-note {
+  color: #777;
+  font-size: 0.85rem;
+  text-align: center;
+  margin: -12px 0 24px;
+}
+.report p code { overflow-wrap: anywhere; }
+.report figure img { margin: 0 auto; }
+.report figure img + img { margin-top: 12px; }
